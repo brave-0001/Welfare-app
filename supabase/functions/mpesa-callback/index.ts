@@ -9,14 +9,29 @@ const supabase = createClient(
 serve(async (req) => {
   try {
     const body = await req.json();
-    const result = body?.Body?.stkCallback;
+    const cb = body?.Body?.stkCallback;
+    if (!cb) return new Response("ok");
 
-    if (result?.ResultCode === 0) {
-      const phone = result.CallbackMetadata.Item.find(
-        (i: any) => i.Name === "PhoneNumber"
-      )?.Value?.toString();
+    if (cb.ResultCode === 0) {
+      const items: Array<{ Name: string; Value: unknown }> = cb.CallbackMetadata?.Item ?? [];
+      const get = (name: string) => items.find((i) => i.Name === name)?.Value;
 
-      if (phone) {
+      const phone = String(get("PhoneNumber") ?? "");
+      const accountRef = String(get("AccountReference") ?? "");
+
+      // If accountRef contains a contributionId (format: "CWG_<uuid>"), confirm that contribution
+      const parts = accountRef.split("_");
+      const contributionId = parts.length > 1 ? parts[parts.length - 1] : null;
+
+      if (contributionId && contributionId.length === 36) {
+        await supabase
+          .from("contributions")
+          .update({ status: "confirmed" })
+          .eq("id", contributionId);
+      }
+
+      // Also mark member as paid if it was a membership payment
+      if (!contributionId) {
         await supabase
           .from("members")
           .update({ paid: true })
