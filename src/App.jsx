@@ -7,7 +7,7 @@ const CONFIG = {
     url: "https://ttnztozwxhoxqlalhyts.supabase.co",
     anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR0bnp0b3p3eGhveHFsYWxoeXRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0NTg1MjEsImV4cCI6MjA4ODAzNDUyMX0.Hb7JJxtitpSzf6YHm7a8UfGFSFXyUwMAdqMBkcOuW18",
   },
-  treasurer: { email: "treasurer@yourgroup.org" },
+  treasurer: { email: "treasurer@yourgroup.org", phone: "254700000000" },
   group: {
     name: "Community Welfare Group",
     tagline: "For each other. Always.",
@@ -15,18 +15,18 @@ const CONFIG = {
     membershipFee: 50,
     monthlyFee: 200,
     whatsapp: "https://chat.whatsapp.com/KPQUvYLxOtT30lTTsNbrlx?mode=hq1tcli",
+    regPrefix: "COM",
   },
   mpesa: { paybill: "625625", account: "7717127865" },
   executives: [
-    { name: "Isaac Kipngetich", title: "Chairperson", bio: "Leads with clarity. Keeps the group moving forward.", photo: "/chair.jpg" },
-    { name: "Daisy Sakwa", title: "Vice Chairperson", bio: "Bridges ideas and action. Always present when needed.", photo: "/vice.jpg" },
-    { name: "Kelvin Simiyu", title: "Secretary", bio: "Keeps records sharp. Nothing falls through the cracks.", photo: "/secretary.jpg" },
-    { name: "Brevian Emmanuel", title: "Treasurer", bio: "Manages every shilling with precision and care.", photo: "/treasurer.jpg" },
+    { name: "Isaac Kipngetich", title: "Chairperson",     bio: "Leads with clarity. Keeps the group moving forward.",    photo: "/chair.jpg" },
+    { name: "Daisy Sakwa",      title: "Vice Chairperson", bio: "Bridges ideas and action. Always present when needed.", photo: "/vice.jpg" },
+    { name: "Kelvin Simiyu",    title: "Secretary",        bio: "Keeps records sharp. Nothing falls through the cracks.", photo: "/secretary.jpg" },
+    { name: "Brevian Emmanuel", title: "Treasurer",        bio: "Manages every shilling with precision and care.",        photo: "/treasurer.jpg" },
   ],
   developer: { name: "Brevian Emmanuel", description: "Designed and built with intention.", portfolio: "https://brevian.online" },
 };
 
-const TREASURER_PHONE = "254700000000";
 const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.anonKey);
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -34,40 +34,48 @@ const fmt = {
   currency: (n) => `KSh ${Number(n).toLocaleString()}`,
   date: (d) => new Date(d).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" }),
   phone: (p) => p.replace(/\D/g, "").replace(/^0/, "254"),
-  monthKey: () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; },
-  monthLabel: () => new Date().toLocaleDateString("en-KE", { month: "long", year: "numeric" }),
+  monthKey: (offset = 0) => { const n = new Date(); n.setMonth(n.getMonth() + offset); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; },
+  monthLabel: (key) => { const d = key ? new Date(key+"-01") : new Date(); return d.toLocaleDateString("en-KE", { month: "long", year: "numeric" }); },
+  shortMonth: (key) => new Date(key+"-01").toLocaleDateString("en-KE", { month: "short" }),
+  initials: (name) => name.split(" ").map((n) => n[0]).join("").slice(0,2).toUpperCase(),
 };
 
 const isSafaricom = (phone) => /^254(7[0-9]{8}|1[01][0-9]{7})$/.test(fmt.phone(phone));
-
 const STATUS_LABEL = { pending: "Pending", approved: "Approved", declined: "Declined" };
-const STATUS_COLOR = { pending: "#6B9071", approved: "#375534", declined: "#b94040" };
 
 // ─── Router ───────────────────────────────────────────────────────────────────
-const getHash = () => window.location.hash.replace("#", "") || "/";
+const getHash = () => window.location.hash.replace("#","") || "/";
 const navigate = (path) => { window.location.hash = path; };
 
 function useRoute() {
   const [route, setRoute] = useState(getHash);
   useEffect(() => {
-    const handler = () => setRoute(getHash());
-    window.addEventListener("hashchange", handler);
-    return () => window.removeEventListener("hashchange", handler);
+    const h = () => setRoute(getHash());
+    window.addEventListener("hashchange", h);
+    return () => window.removeEventListener("hashchange", h);
   }, []);
   return route;
 }
 
-// ─── Hooks ────────────────────────────────────────────────────────────────────
+function useAuthSession() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => subscription.unsubscribe();
+  }, []);
+  return { session, authLoading };
+}
+
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved) return saved === "dark";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const s = localStorage.getItem("theme");
+    return s ? s === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
     localStorage.setItem("theme", dark ? "dark" : "light");
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#080f0a" : "#0F2A1D");
   }, [dark]);
   return [dark, setDark];
 }
@@ -88,11 +96,13 @@ function useLoans(memberId) {
 function useAllLoans() {
   const [loans, setLoans] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
+  const refetch = useCallback(() => {
+    setLoading(true);
     supabase.from("loan_requests").select("*, members(full_name, phone)").order("created_at", { ascending: false })
       .then(({ data }) => { setLoans(data ?? []); setLoading(false); });
   }, []);
-  return { loans, loading };
+  useEffect(() => { refetch(); }, [refetch]);
+  return { loans, loading, refetch };
 }
 
 function useContributions(memberId) {
@@ -108,80 +118,121 @@ function useContributions(memberId) {
   return { contributions, loading, refetch };
 }
 
-// ─── Shared Components ────────────────────────────────────────────────────────
+function useMembers() {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    supabase.from("members").select("id,full_name,phone,paid").order("full_name")
+      .then(({ data }) => { setMembers(data ?? []); setLoading(false); });
+  }, []);
+  return { members, loading };
+}
+
+function useAnnouncement() {
+  const [ann, setAnn] = useState(null);
+  useEffect(() => {
+    supabase.from("announcements").select("*").eq("active",true).order("created_at",{ascending:false}).limit(1).single()
+      .then(({ data }) => { if (data) setAnn(data); });
+  }, []);
+  return ann;
+}
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
 function DarkToggle({ dark, onToggle }) {
   return (
-    <button onClick={onToggle} aria-label="Toggle dark mode" style={{
-      position:"fixed", top:"1.25rem", right:"1.25rem", zIndex:200,
-      width:"2.6rem", height:"1.4rem", borderRadius:"999px",
-      border:"1px solid var(--border)", background:"rgba(128,128,128,0.12)",
-      backdropFilter:"blur(16px)", WebkitBackdropFilter:"blur(16px)",
-      cursor:"pointer", padding:0, display:"flex", alignItems:"center",
-      transition:"all 0.2s",
-    }}>
-      <span style={{
-        display:"block", width:"0.95rem", height:"0.95rem", borderRadius:"50%",
-        background:"var(--fg)", marginLeft: dark ? "1.4rem" : "0.18rem",
-        transition:"margin 0.25s cubic-bezier(0.4,0,0.2,1)",
-        boxShadow:"0 1px 3px rgba(0,0,0,0.2)",
-      }} />
+    <button onClick={onToggle} aria-label="Toggle theme" className="theme-toggle">
+      <span className="theme-toggle-knob" style={{ marginLeft: dark ? "1.35rem" : "0.17rem" }} />
     </button>
   );
 }
 
-function Spinner({ size = 22 }) {
+function Spinner() {
+  return <div className="spinner-wrap"><span className="spinner" /></div>;
+}
+
+function NeuCard({ children, className = "", style = {}, pressed = false }) {
+  return <div className={`neu-card ${pressed ? "neu-card-pressed" : ""} ${className}`} style={style}>{children}</div>;
+}
+
+function NeuInput({ label, hint, error, ...props }) {
   return (
-    <div style={{ display:"flex", justifyContent:"center", padding:"3rem 0" }}>
-      <span style={{ display:"inline-block", width:size, height:size, border:"2px solid var(--border)", borderTopColor:"var(--accent)", borderRadius:"50%", animation:"spin 0.7s linear infinite" }} />
+    <div className="neu-field">
+      {label && <label className="neu-label">{label}{hint && <span className="neu-hint">{hint}</span>}</label>}
+      {props.type === "textarea"
+        ? <textarea className="neu-input neu-textarea" {...props} />
+        : <input className="neu-input" {...props} />}
+      {error && <p className="neu-error">{error}</p>}
     </div>
   );
 }
 
-function Field({ label, hint, error, children }) {
+function NeuBtn({ children, loading, variant = "primary", full, small, ...props }) {
   return (
-    <div className="field">
-      {label && <label className="field-label">{label}{hint && <span className="field-hint">{hint}</span>}</label>}
-      {children}
-      {error && <p className="field-error">{error}</p>}
-    </div>
-  );
-}
-
-function Input(props) { return <input className="input" {...props} />; }
-function Textarea(props) { return <textarea className="input textarea" {...props} />; }
-
-function Btn({ children, loading, variant = "primary", full, ...props }) {
-  return (
-    <button className={`btn btn-${variant}${full ? " btn-full" : ""}`} disabled={loading || props.disabled} {...props}>
+    <button className={`neu-btn neu-btn-${variant}${full?" neu-btn-full":""}${small?" neu-btn-small":""}`}
+      disabled={loading || props.disabled} {...props}>
       {loading ? <span className="btn-spinner" /> : children}
     </button>
   );
 }
 
-function Badge({ status }) {
-  const colors = { approved:"#375534", pending:"#6B9071", declined:"#b94040" };
-  const c = colors[status] ?? "#6B9071";
-  return (
-    <span style={{ fontSize:"0.66rem", fontWeight:700, letterSpacing:"0.06em", textTransform:"uppercase", color:c, background:`color-mix(in srgb,${c} 13%,transparent)`, padding:"0.22rem 0.6rem", borderRadius:"5px", flexShrink:0 }}>
-      {STATUS_LABEL[status] ?? status}
-    </span>
-  );
+function StatusBadge({ status }) {
+  return <span className={`status-badge status-${status}`}>{STATUS_LABEL[status] ?? status}</span>;
 }
 
 function ActivePill({ active }) {
   return (
-    <span className={`pill ${active ? "pill-active" : "pill-inactive"}`}>
-      <span className="pill-dot" />{active ? "Active" : "Inactive"}
+    <span className={`active-pill ${active ? "active-pill-on" : "active-pill-off"}`}>
+      <span className="active-pip" />{active ? "Active" : "Inactive"}
     </span>
   );
 }
 
-function SectionHeader({ label, action }) {
+// ─── Announcement ─────────────────────────────────────────────────────────────
+function AnnouncementBanner({ ann }) {
+  const [gone, setGone] = useState(() => sessionStorage.getItem(`ann-${ann?.id}`) === "1");
+  if (!ann || gone) return null;
   return (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"1rem" }}>
-      <p className="module-label" style={{ marginBottom:0 }}>{label}</p>
-      {action}
+    <div className="ann-bar">
+      <span className="ann-dot" />
+      <div className="ann-text">
+        <span className="ann-title">{ann.title}</span>
+        {ann.body && <span className="ann-body">{ann.body}</span>}
+      </div>
+      <button className="ann-close" onClick={() => { sessionStorage.setItem(`ann-${ann.id}`,"1"); setGone(true); }}>
+        <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+      </button>
     </div>
+  );
+}
+
+// ─── Streak ───────────────────────────────────────────────────────────────────
+function ContributionStreak({ contributions }) {
+  const months = useMemo(() => Array.from({length:6},(_,i) => {
+    const key = fmt.monthKey(i-5);
+    return { key, label: fmt.shortMonth(key), paid: contributions.some(c => c.month_key===key && c.status==="confirmed") };
+  }), [contributions]);
+
+  const streak = useMemo(() => {
+    let n = 0;
+    for (let i = months.length-1; i >= 0; i--) { if (months[i].paid) n++; else break; }
+    return n;
+  }, [months]);
+
+  return (
+    <NeuCard className="streak-card">
+      <p className="section-label" style={{marginBottom:"0.9rem"}}>6-month streak</p>
+      <div className="streak-row">
+        {months.map(m => (
+          <div key={m.key} className="streak-item">
+            <div className={`streak-pip ${m.paid ? "streak-pip-paid" : "streak-pip-empty"}`}>
+              {m.paid && <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1.5 6 4.5 9 10.5 3"/></svg>}
+            </div>
+            <span className="streak-lbl">{m.label}</span>
+          </div>
+        ))}
+      </div>
+      {streak > 1 && <p className="streak-msg">{streak}-month streak. Keep it going.</p>}
+    </NeuCard>
   );
 }
 
@@ -194,23 +245,22 @@ function ContributionModule({ member }) {
   const [pollCount, setPollCount] = useState(0);
 
   const currentKey = fmt.monthKey();
-  const paidThisMonth = useMemo(() => contributions.some((c) => c.month_key === currentKey && c.status === "confirmed"), [contributions, currentKey]);
-  const totalPaid = useMemo(() => contributions.filter((c) => c.status === "confirmed").reduce((s, c) => s + Number(c.amount), 0), [contributions]);
+  const paidThisMonth = useMemo(() => contributions.some(c => c.month_key===currentKey && c.status==="confirmed"), [contributions, currentKey]);
+  const totalPaid = useMemo(() => contributions.filter(c => c.status==="confirmed").reduce((s,c) => s+Number(c.amount), 0), [contributions]);
 
   useEffect(() => {
     if (step !== "waiting") return;
-    const interval = setInterval(async () => {
-      const { data } = await supabase.from("contributions").select("status").eq("member_id", member.id).eq("month_key", currentKey).single();
-      if (data?.status === "confirmed") { clearInterval(interval); refetch(); setStep("done"); }
-      setPollCount((n) => n + 1);
+    const iv = setInterval(async () => {
+      const { data } = await supabase.from("contributions").select("status").eq("member_id",member.id).eq("month_key",currentKey).single();
+      if (data?.status === "confirmed") { clearInterval(iv); refetch(); setStep("done"); }
+      setPollCount(n => n+1);
     }, 4000);
-    return () => clearInterval(interval);
+    return () => clearInterval(iv);
   }, [step, member.id, currentKey, refetch]);
 
   const handlePay = useCallback(async () => {
     if (!isSafaricom(member.phone)) { setNotSafaricom(true); return; }
-    setNotSafaricom(false);
-    setPaying(true);
+    setNotSafaricom(false); setPaying(true);
     const { data: contrib } = await supabase.from("contributions")
       .upsert({ member_id: member.id, amount: CONFIG.group.monthlyFee, month_key: currentKey, status: "pending" }, { onConflict: "member_id,month_key" })
       .select("id").single();
@@ -219,86 +269,84 @@ function ContributionModule({ member }) {
         body: { phone: fmt.phone(member.phone), amount: CONFIG.group.monthlyFee, paybill: CONFIG.mpesa.paybill, account: CONFIG.mpesa.account, contributionId: contrib?.id },
       });
       setStep("waiting");
-    } catch (err) { console.error(err); setStep("waiting"); }
+    } catch (e) { console.error(e); setStep("waiting"); }
     setPaying(false);
   }, [member, currentKey]);
 
   if (loading) return <Spinner />;
 
   return (
-    <div className="section-wrap">
-      {/* Status Card */}
-      <div className={`status-card ${paidThisMonth ? "status-card-active" : "status-card-due"}`}>
-        <div className="status-card-inner">
+    <div className="section-stack">
+      {/* Hero status card */}
+      <div className={`contrib-hero ${paidThisMonth ? "contrib-hero-paid" : "contrib-hero-due"}`}>
+        <div className="contrib-hero-inner">
           <div>
-            <p className="status-month">{fmt.monthLabel()}</p>
-            <h2 className="status-heading">{paidThisMonth ? "You're covered." : "Contribution due."}</h2>
-            <p className="status-sub">{paidThisMonth ? `${fmt.currency(totalPaid)} contributed in total.` : `${fmt.currency(CONFIG.group.monthlyFee)} keeps your account active.`}</p>
+            <p className="contrib-month">{fmt.monthLabel()}</p>
+            <h2 className="contrib-heading">{paidThisMonth ? "You're covered." : "Contribution due."}</h2>
+            <p className="contrib-sub">{paidThisMonth ? `${fmt.currency(totalPaid)} total contributed.` : `${fmt.currency(CONFIG.group.monthlyFee)} keeps your account active.`}</p>
           </div>
           <ActivePill active={paidThisMonth} />
         </div>
         {paidThisMonth && (
-          <div className="status-check">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+          <div className="contrib-check">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             Paid for {fmt.monthLabel()}
           </div>
         )}
       </div>
 
-      {/* Pay Block */}
+      {contributions.length > 0 && <ContributionStreak contributions={contributions} />}
+
       {!paidThisMonth && step === "idle" && (
-        <div className="card">
+        <NeuCard>
           {notSafaricom && (
-            <div className="notice notice-warn" style={{ marginBottom:"1rem" }}>
-              <p className="notice-title">Safaricom only.</p>
-              <p className="notice-body">STK Push requires a Safaricom line. Pay manually — Paybill <strong>{CONFIG.mpesa.paybill}</strong>, Account <strong>{CONFIG.mpesa.account}</strong>.</p>
+            <div className="inline-notice inline-warn" style={{marginBottom:"1rem"}}>
+              <strong>Safaricom only.</strong> Pay manually — Paybill <strong>{CONFIG.mpesa.paybill}</strong>, Account <strong>{CONFIG.mpesa.account}</strong>.
             </div>
           )}
-          <Btn full loading={paying} onClick={handlePay}>
+          <NeuBtn full loading={paying} onClick={handlePay}>
             Pay {fmt.currency(CONFIG.group.monthlyFee)} · M-Pesa
-          </Btn>
-          <p className="pay-hint">Prompt sent to <strong>{member.phone}</strong>. Enter your PIN to confirm.</p>
-        </div>
+          </NeuBtn>
+          <p className="pay-hint">Prompt sent to <strong>{member.phone}</strong>. Enter your PIN.</p>
+        </NeuCard>
       )}
 
       {step === "waiting" && !paidThisMonth && (
-        <div className="card">
+        <NeuCard>
           <div className="waiting-row">
             <span className="pulse-dot" />
             <div>
               <p className="waiting-title">Waiting for your PIN.</p>
-              <p className="waiting-sub">Enter your M-PESA PIN on {member.phone}. Updates automatically.</p>
+              <p className="waiting-sub">Enter M-PESA PIN on {member.phone}. Auto-updates.</p>
             </div>
           </div>
           {pollCount > 6 && (
-            <button className="link-muted" onClick={() => { refetch(); setStep("idle"); }}>
+            <button className="text-link" style={{marginTop:"0.75rem"}} onClick={() => { refetch(); setStep("idle"); }}>
               Didn't receive a prompt? Try again
             </button>
           )}
-        </div>
+        </NeuCard>
       )}
 
       {(step === "done" || (step === "waiting" && paidThisMonth)) && (
-        <div className="notice notice-success">
-          <p className="notice-title">Confirmed.</p>
-          <p className="notice-body">Your account is active for {fmt.monthLabel()}.</p>
+        <div className="inline-notice inline-success">
+          <strong>Confirmed.</strong> Your account is active for {fmt.monthLabel()}.
         </div>
       )}
 
-      {/* History */}
       {contributions.length > 0 && (
         <div>
-          <SectionHeader label="Payment history" />
-          <div className="list-wrap">
-            {contributions.slice(0, 8).map((c) => (
-              <div key={c.id} className="list-row">
-                <div className="list-info">
-                  <span className="list-title">{new Date(c.month_key+"-01").toLocaleDateString("en-KE",{month:"long",year:"numeric"})}</span>
-                  <span className="list-meta">{fmt.date(c.created_at)}</span>
+          <p className="section-label">Payment history</p>
+          <div className="neu-list">
+            {contributions.slice(0,8).map(c => (
+              <div key={c.id} className="neu-list-row">
+                <div className="row-info">
+                  <span className="row-title">{new Date(c.month_key+"-01").toLocaleDateString("en-KE",{month:"long",year:"numeric"})}</span>
+                  <span className="row-meta">{fmt.date(c.created_at)}</span>
                 </div>
-                <div className="list-right">
-                  <span className="list-amount">{fmt.currency(c.amount)}</span>
-                  <Badge status={c.status === "confirmed" ? "approved" : "pending"} />
+                <div className="row-right">
+                  <span className="row-amount">{fmt.currency(c.amount)}</span>
+                  <StatusBadge status={c.status==="confirmed"?"approved":"pending"} />
                 </div>
               </div>
             ))}
@@ -310,45 +358,40 @@ function ContributionModule({ member }) {
 }
 
 // ─── Loan Module ──────────────────────────────────────────────────────────────
-function LoanRequestModule({ member, isActive }) {
-  const [form, setForm] = useState({ full_name: "", reg_number: "", phone: member.phone ?? "", amount: "", description: "" });
+function LoanModule({ member, isActive }) {
+  const [form, setForm] = useState({ full_name:"", reg_number:"", phone: member.phone??"", amount:"", description:"" });
   const [status, setStatus] = useState(null);
   const [errors, setErrors] = useState({});
 
-  const set = (k) => (e) => {
-    const val = k === "reg_number" ? e.target.value.toUpperCase() : e.target.value;
-    setForm((f) => ({ ...f, [k]: val }));
-    if (errors[k]) setErrors((e) => ({ ...e, [k]: null }));
-    if (status === "denied") setStatus(null);
+  const set = k => e => {
+    const v = k==="reg_number" ? e.target.value.toUpperCase() : e.target.value;
+    setForm(f => ({...f,[k]:v}));
+    if (errors[k]) setErrors(p => ({...p,[k]:null}));
+    if (status==="denied") setStatus(null);
   };
 
-  if (!isActive) {
-    return (
-      <div className="section-wrap">
-        <div className="gate-card">
-          <div className="gate-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          </div>
-          <p className="gate-title">Account inactive.</p>
-          <p className="gate-sub">Contribute {fmt.currency(CONFIG.group.monthlyFee)} for {fmt.monthLabel()} to unlock loan requests.</p>
+  if (!isActive) return (
+    <div className="section-stack">
+      <NeuCard className="gate-card">
+        <div className="gate-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         </div>
-      </div>
-    );
-  }
+        <p className="gate-title">Account inactive.</p>
+        <p className="gate-sub">Contribute {fmt.currency(CONFIG.group.monthlyFee)} for {fmt.monthLabel()} to unlock loan requests.</p>
+      </NeuCard>
+    </div>
+  );
 
-  if (status === "submitted") {
-    return (
-      <div className="section-wrap">
-        <div className="notice notice-success">
-          <p className="notice-title">Request received.</p>
-          <p className="notice-body">The treasurer will review and reach out shortly.</p>
-        </div>
-        <button className="link-muted" style={{ marginTop:"0.75rem" }} onClick={() => { setStatus(null); setForm({ full_name:"", reg_number:"", phone:member.phone??"", amount:"", description:"" }); }}>
-          Submit another request
-        </button>
+  if (status === "submitted") return (
+    <div className="section-stack">
+      <div className="inline-notice inline-success">
+        <strong>Request received.</strong> The treasurer will review and reach out.
       </div>
-    );
-  }
+      <button className="text-link" onClick={() => { setStatus(null); setForm({full_name:"",reg_number:"",phone:member.phone??"",amount:"",description:""}); }}>
+        Submit another
+      </button>
+    </div>
+  );
 
   const handleSubmit = async () => {
     const e = {};
@@ -357,280 +400,348 @@ function LoanRequestModule({ member, isActive }) {
     if (!form.phone.trim()) e.phone = "Required.";
     if (!form.amount || isNaN(form.amount) || Number(form.amount) <= 0) e.amount = "Enter a valid amount.";
     if (!form.description.trim()) e.description = "Required.";
-    if (form.description.length > 100) e.description = "Max 100 characters.";
+    if (form.description.length > 100) e.description = "Max 100 chars.";
     if (Object.keys(e).length) { setErrors(e); return; }
-    if (!form.reg_number.startsWith("COM")) { setStatus("denied"); return; }
+    if (!form.reg_number.startsWith(CONFIG.group.regPrefix)) { setStatus("denied"); return; }
     setStatus("loading");
     const { error } = await supabase.from("loan_requests").insert({
       member_id: member.id,
-      description: `${form.description} | Reg: ${form.reg_number}`,
+      description: form.description,
+      reg_number: form.reg_number,
       amount: Number(form.amount),
       status: "pending",
     });
     if (!error) {
-      await supabase.functions.invoke("send-loan-email", {
-        body: { to: CONFIG.treasurer.email, subject: `Loan request — ${form.full_name}`, member: { name: form.full_name, phone: form.phone, reg: form.reg_number }, loan: { amount: form.amount, description: form.description } },
-      });
+      await supabase.functions.invoke("send-loan-email", { body: { to: CONFIG.treasurer.email, subject:`Loan — ${form.full_name}`, member:{name:form.full_name,phone:form.phone,reg:form.reg_number}, loan:{amount:form.amount,description:form.description} } });
       setStatus("submitted");
-    } else { setStatus(null); }
+    } else setStatus(null);
   };
 
   return (
-    <div className="section-wrap">
-      {status === "denied" && (
-        <div className="notice notice-warn" style={{ marginBottom:"1rem" }}>
-          <p className="notice-title">Not eligible.</p>
-          <p className="notice-body">This welfare group supports Computer Science students. Your registration number doesn't match.</p>
+    <div className="section-stack">
+      {status==="denied" && (
+        <div className="inline-notice inline-warn">
+          <strong>Not eligible.</strong> This group supports {CONFIG.group.regPrefix} students.
         </div>
       )}
-      <div className="card card-form">
-        <Field label="Full name" error={errors.full_name}>
-          <Input placeholder="As per your ID" value={form.full_name} onChange={set("full_name")} />
-        </Field>
-        <Field label="Registration number" error={errors.reg_number}>
-          <Input placeholder="COM/XXX/XXXX" value={form.reg_number} onChange={set("reg_number")} style={{ textTransform:"uppercase" }} />
-        </Field>
-        <Field label="Phone number" error={errors.phone}>
-          <Input type="tel" placeholder="07XX XXX XXX" value={form.phone} onChange={set("phone")} />
-        </Field>
-        <Field label="Amount (KSh)" error={errors.amount}>
-          <Input type="number" placeholder="e.g. 2000" min="1" value={form.amount} onChange={set("amount")} />
-        </Field>
-        <Field label="Description" hint={`  ·  ${100 - form.description.length} left`} error={errors.description}>
-          <Textarea placeholder="What do you need this loan for?" value={form.description} maxLength={100} rows={3} onChange={set("description")} />
-        </Field>
-        <Btn full loading={status === "loading"} onClick={handleSubmit}>Submit request</Btn>
-      </div>
+      <NeuCard>
+        <div className="form-stack">
+          <NeuInput label="Full name" placeholder="As per your ID" value={form.full_name} onChange={set("full_name")} error={errors.full_name} />
+          <NeuInput label="Registration number" placeholder={`${CONFIG.group.regPrefix}/XXX/XXXX`} value={form.reg_number} onChange={set("reg_number")} style={{textTransform:"uppercase"}} error={errors.reg_number} />
+          <NeuInput label="Phone number" type="tel" placeholder="07XX XXX XXX" value={form.phone} onChange={set("phone")} error={errors.phone} />
+          <NeuInput label="Amount (KSh)" type="number" placeholder="e.g. 2000" min="1" value={form.amount} onChange={set("amount")} error={errors.amount} />
+          <NeuInput label="Description" hint={`  ·  ${100-form.description.length} left`} type="textarea" placeholder="What do you need this loan for?" value={form.description} maxLength={100} rows={3} onChange={set("description")} error={errors.description} />
+          <NeuBtn full loading={status==="loading"} onClick={handleSubmit}>Submit request</NeuBtn>
+        </div>
+      </NeuCard>
     </div>
   );
 }
 
-// ─── Community Modules ────────────────────────────────────────────────────────
+// ─── Community ────────────────────────────────────────────────────────────────
 function CommunityModule() {
   return (
-    <div className="section-wrap">
-      <div className="card community-card">
-        <h2 className="community-heading">{CONFIG.group.description}</h2>
-        <div className="benefit-list">
-          {["Emergency financial support when it matters most.", "A community that moves as one.", "Student welfare, handled with dignity."].map((b) => (
-            <div key={b} className="benefit-row"><span className="benefit-dot" /><span>{b}</span></div>
+    <div className="section-stack">
+      <NeuCard className="community-card">
+        <h2 className="community-title">{CONFIG.group.description}</h2>
+        <div className="benefit-stack">
+          {["Emergency financial support when it matters most.", "A community that moves as one.", "Student welfare, handled with dignity."].map(b => (
+            <div key={b} className="benefit-row"><span className="benefit-dot"/><span>{b}</span></div>
           ))}
         </div>
-      </div>
+      </NeuCard>
       <div className="wa-card">
         <div>
-          <h3 className="wa-heading">Join the conversation.</h3>
+          <h3 className="wa-title">Join the conversation.</h3>
           <p className="wa-sub">Updates, support, and community — all in one place.</p>
         </div>
-        <a href={CONFIG.group.whatsapp} target="_blank" rel="noreferrer" className="btn-wa">Join WhatsApp</a>
+        <a href={CONFIG.group.whatsapp} target="_blank" rel="noreferrer" className="neu-btn neu-btn-accent">Join WhatsApp</a>
       </div>
-      <div className="dev-card">
-        <div>
-          <p className="dev-name">{CONFIG.developer.name}</p>
-          <p className="dev-desc">{CONFIG.developer.description}</p>
+      <NeuCard>
+        <div className="dev-row">
+          <div>
+            <p className="dev-name">{CONFIG.developer.name}</p>
+            <p className="dev-desc">{CONFIG.developer.description}</p>
+          </div>
+          <a href={CONFIG.developer.portfolio} target="_blank" rel="noreferrer" className="neu-btn neu-btn-ghost neu-btn-small">Portfolio →</a>
         </div>
-        <a href={CONFIG.developer.portfolio} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">Portfolio →</a>
-      </div>
+      </NeuCard>
     </div>
   );
 }
 
+// ─── Executives ───────────────────────────────────────────────────────────────
 function ExecutivesModule() {
   return (
-    <div className="section-wrap">
+    <div className="section-stack">
       <div className="exec-grid">
-        {CONFIG.executives.map((ex) => (
-          <div key={ex.name} className="exec-card">
+        {CONFIG.executives.map(ex => (
+          <NeuCard key={ex.name} className="exec-card">
             <div className="exec-avatar-wrap">
-              <img src={ex.photo} alt={ex.name} className="exec-avatar" onError={(e) => { e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }} />
-              <div className="exec-initials" style={{ display:"none" }}>{ex.name.split(" ").map((n)=>n[0]).join("").slice(0,2)}</div>
+              <img src={ex.photo} alt={ex.name} className="exec-avatar" onError={e => { e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }} />
+              <div className="exec-initials" style={{display:"none"}}>{fmt.initials(ex.name)}</div>
             </div>
             <span className="exec-name">{ex.name}</span>
             <span className="exec-role">{ex.title}</span>
             <span className="exec-bio">{ex.bio}</span>
-          </div>
+          </NeuCard>
         ))}
       </div>
     </div>
   );
 }
 
-// ─── Pages ────────────────────────────────────────────────────────────────────
-function LandingPage({ onLogin }) {
-  const [phone, setPhone] = useState("");
+// ─── Directory ────────────────────────────────────────────────────────────────
+function DirectoryModule() {
+  const { members, loading } = useMembers();
+  const [q, setQ] = useState("");
+  const filtered = useMemo(() => {
+    const s = q.toLowerCase().trim();
+    if (!s) return members;
+    return members.filter(m => m.full_name.toLowerCase().includes(s) || m.phone.includes(s));
+  }, [members, q]);
+  const activeCount = useMemo(() => members.filter(m => m.paid).length, [members]);
+  if (loading) return <Spinner />;
+  return (
+    <div className="section-stack">
+      <div className="dir-top">
+        <div>
+          <p className="section-label" style={{marginBottom:"0.15rem"}}>Members</p>
+          <p className="dir-count">{activeCount} of {members.length} active</p>
+        </div>
+        <input className="neu-input dir-search" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
+      </div>
+      {filtered.length === 0 ? <p className="empty-msg">No members found.</p> : (
+        <div className="neu-list">
+          {filtered.map(m => (
+            <div key={m.id} className="neu-list-row">
+              <div style={{display:"flex",alignItems:"center",gap:"0.8rem",flex:1,minWidth:0}}>
+                <div className="dir-avatar">{fmt.initials(m.full_name)}</div>
+                <div className="row-info">
+                  <span className="row-title">{m.full_name}</span>
+                  <span className="row-meta">{m.phone}</span>
+                </div>
+              </div>
+              <ActivePill active={m.paid} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Landing Page ─────────────────────────────────────────────────────────────
+function LandingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = useCallback(async () => {
-    const cleaned = fmt.phone(phone);
-    if (cleaned.length < 12) { setError("Enter a valid phone number."); return; }
+  const handleGoogle = useCallback(async () => {
     setLoading(true); setError("");
-    const { data } = await supabase.from("members").select("*").eq("phone", cleaned).single();
-    setLoading(false);
-    if (!data || !data.paid) { navigate("/register"); return; }
-    onLogin(data); navigate("/dashboard");
-  }, [phone, onLogin]);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin + window.location.pathname },
+    });
+    if (error) { setError("Could not connect to Google. Try again."); setLoading(false); }
+  }, []);
 
   return (
-    <div className="splash">
-      <div className="splash-bg" />
-      <div className="splash-content">
-        <div className="splash-badge">Student Welfare</div>
-        <h1 className="splash-title">{CONFIG.group.name}</h1>
-        <p className="splash-tagline">{CONFIG.group.tagline}</p>
-        <div className="auth-card">
-          <Field label="Phone number" error={error}>
-            <Input type="tel" placeholder="07XX XXX XXX" value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSubmit()} />
-          </Field>
-          <Btn full loading={loading} onClick={handleSubmit}>Sign in</Btn>
-          <p className="auth-foot">New member? <button className="link" onClick={() => navigate("/register")}>Join for {fmt.currency(CONFIG.group.membershipFee)}.</button></p>
+    <div className="splash-page">
+      <div className="splash-center">
+        <div className="splash-brand">
+          <p className="splash-eyebrow">Student Welfare</p>
+          <h1 className="splash-title">{CONFIG.group.name}</h1>
+          <p className="splash-tagline">{CONFIG.group.tagline}</p>
         </div>
+        <NeuCard className="auth-panel">
+          {error && <p className="neu-error" style={{textAlign:"center",marginBottom:"0.5rem"}}>{error}</p>}
+          <NeuBtn full loading={loading} onClick={handleGoogle} variant="google">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{flexShrink:0}}>
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            Continue with Google
+          </NeuBtn>
+          <p className="auth-hint">Use your university Google account.</p>
+        </NeuCard>
       </div>
     </div>
   );
 }
 
-function RegisterPage() {
-  const [form, setForm] = useState({ full_name: "", phone: "" });
+// ─── Register Page ────────────────────────────────────────────────────────────
+function RegisterPage({ session }) {
+  const [phone, setPhone] = useState("");
   const [step, setStep] = useState("form");
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState({});
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const [error, setError] = useState("");
+  const [pollCount, setPollCount] = useState(0);
 
-  const validate = useCallback(() => {
-    const e = {};
-    if (!form.full_name.trim()) e.full_name = "Name is required.";
-    if (fmt.phone(form.phone).length < 12) e.phone = "Enter a valid phone number.";
-    return e;
-  }, [form]);
+  const googleName  = session?.user?.user_metadata?.full_name ?? "";
+  const googleEmail = session?.user?.email ?? "";
+
+  useEffect(() => {
+    if (step !== "paying") return;
+    const iv = setInterval(async () => {
+      const { data } = await supabase.from("members").select("paid").eq("email",googleEmail).single();
+      if (data?.paid) { clearInterval(iv); setStep("done"); }
+      setPollCount(n => n+1);
+    }, 4000);
+    return () => clearInterval(iv);
+  }, [step, googleEmail]);
 
   const handleRegister = useCallback(async () => {
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    setLoading(true); setErrors({});
-    const phone = fmt.phone(form.phone);
-    const { data: existing } = await supabase.from("members").select("id,paid").eq("phone", phone).single();
-    if (existing?.paid) { navigate("/"); return; }
+    const cleaned = fmt.phone(phone);
+    if (cleaned.length < 12) { setError("Enter a valid Safaricom number."); return; }
+    setLoading(true); setError("");
+    const { data: existing } = await supabase.from("members").select("id,paid").eq("email",googleEmail).single();
+    if (existing?.paid) { navigate("/dashboard"); return; }
     if (!existing) {
-      const { error } = await supabase.from("members").insert({ full_name: form.full_name.trim(), phone, paid: false });
-      if (error) { setErrors({ server: "Could not save. Try again." }); setLoading(false); return; }
+      const { error: err } = await supabase.from("members").insert({ full_name: googleName, email: googleEmail, phone: cleaned, paid: false });
+      if (err) { setError("Could not save. Try again."); setLoading(false); return; }
     }
-    try { await supabase.functions.invoke("mpesa-stk-push", { body: { phone, amount: CONFIG.group.membershipFee } }); }
-    catch (err) { console.error(err); }
+    try { await supabase.functions.invoke("mpesa-stk-push", { body: { phone: cleaned, amount: CONFIG.group.membershipFee } }); }
+    catch (e) { console.error(e); }
     setStep("paying"); setLoading(false);
-  }, [form, validate]);
+  }, [phone, googleName, googleEmail]);
 
-  const confirmPayment = useCallback(async () => {
+  const confirmManually = useCallback(async () => {
     setLoading(true);
-    await supabase.from("members").update({ paid: true }).eq("phone", fmt.phone(form.phone));
+    await supabase.from("members").update({ paid: true }).eq("email", googleEmail);
     setStep("done"); setLoading(false);
-  }, [form.phone]);
+  }, [googleEmail]);
 
   if (step === "done") return (
-    <div className="splash"><div className="splash-bg" /><div className="splash-content" style={{ textAlign:"center" }}>
-      <h1 className="splash-title" style={{ fontSize:"clamp(2rem,8vw,4rem)" }}>Welcome.</h1>
-      <p className="splash-tagline">You're part of something real now.</p>
-      <Btn full onClick={() => navigate("/")}>Sign in</Btn>
-    </div></div>
+    <div className="splash-page">
+      <div className="splash-center" style={{textAlign:"center"}}>
+        <h1 className="splash-title" style={{fontSize:"clamp(2rem,8vw,3.5rem)"}}>Welcome.</h1>
+        <p className="splash-tagline">You're part of something real now.</p>
+        <NeuBtn onClick={() => navigate("/dashboard")}>Go to dashboard</NeuBtn>
+      </div>
+    </div>
   );
 
   if (step === "paying") return (
-    <div className="splash"><div className="splash-bg" /><div className="splash-content" style={{ textAlign:"center" }}>
-      <h2 className="splash-title" style={{ fontSize:"clamp(1.8rem,6vw,3rem)" }}>Check your phone.</h2>
-      <p className="splash-tagline" style={{ marginBottom:"2rem" }}>Pay {fmt.currency(CONFIG.group.membershipFee)} sent to <strong style={{ color:"var(--white)" }}>{form.phone}</strong>.</p>
-      <Btn full loading={loading} onClick={confirmPayment}>I've paid</Btn>
-      <button className="link" style={{ display:"block", margin:"1.25rem auto 0", fontSize:"0.82rem", color:"var(--silver)" }} onClick={() => setStep("form")}>Go back</button>
-    </div></div>
+    <div className="splash-page">
+      <div className="splash-center" style={{textAlign:"center"}}>
+        <h2 className="splash-title" style={{fontSize:"clamp(1.8rem,6vw,3rem)"}}>Check your phone.</h2>
+        <p className="splash-tagline" style={{marginBottom:"1.5rem"}}>
+          Pay {fmt.currency(CONFIG.group.membershipFee)} sent to <strong>{phone}</strong>.
+        </p>
+        <div className="waiting-row" style={{justifyContent:"center",marginBottom:"1.5rem"}}>
+          <span className="pulse-dot" /><span className="waiting-sub">Waiting for payment…</span>
+        </div>
+        {pollCount > 6 && (
+          <>
+            <NeuBtn full loading={loading} onClick={confirmManually}>I've paid — confirm</NeuBtn>
+            <button className="text-link" style={{marginTop:"1rem"}} onClick={() => setStep("form")}>Go back</button>
+          </>
+        )}
+      </div>
+    </div>
   );
 
   return (
-    <div className="splash"><div className="splash-bg" /><div className="splash-content">
-      <h1 className="splash-title" style={{ fontSize:"clamp(1.8rem,6vw,3.5rem)" }}>Join the group.</h1>
-      <p className="splash-tagline">{fmt.currency(CONFIG.group.membershipFee)} once. That's it.</p>
-      <div className="auth-card">
-        {errors.server && <p className="field-error">{errors.server}</p>}
-        <Field label="Full name" error={errors.full_name}><Input placeholder="Jane Muthoni" value={form.full_name} onChange={set("full_name")} /></Field>
-        <Field label="Phone number" error={errors.phone}><Input type="tel" placeholder="07XX XXX XXX" value={form.phone} onChange={set("phone")} /></Field>
-        <Btn full loading={loading} onClick={handleRegister}>Pay {fmt.currency(CONFIG.group.membershipFee)} &amp; join</Btn>
-        <p className="auth-foot">Already a member? <button className="link" onClick={() => navigate("/")}>Sign in.</button></p>
+    <div className="splash-page">
+      <div className="splash-center">
+        <h1 className="splash-title" style={{fontSize:"clamp(1.8rem,6vw,3rem)"}}>Join the group.</h1>
+        <p className="splash-tagline">{fmt.currency(CONFIG.group.membershipFee)} once. That's it.</p>
+        <NeuCard className="auth-panel">
+          <div className="google-identity">
+            <img src={session?.user?.user_metadata?.avatar_url} alt="" className="google-avatar" onError={e => e.target.style.display="none"} />
+            <div>
+              <p className="google-name">{googleName}</p>
+              <p className="google-email">{googleEmail}</p>
+            </div>
+          </div>
+          <NeuInput label="M-Pesa phone number" type="tel" placeholder="07XX XXX XXX" value={phone} onChange={e => setPhone(e.target.value)} error={error} />
+          <NeuBtn full loading={loading} onClick={handleRegister}>
+            Pay {fmt.currency(CONFIG.group.membershipFee)} &amp; join
+          </NeuBtn>
+        </NeuCard>
       </div>
-    </div></div>
+    </div>
   );
 }
 
+// ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardPage({ member, onLogout }) {
   const { loans, loading: loansLoading } = useLoans(member.id);
   const { contributions } = useContributions(member.id);
+  const ann = useAnnouncement();
   const [tab, setTab] = useState("contribute");
 
-  const isActive = useMemo(() => contributions.some((c) => c.month_key === fmt.monthKey() && c.status === "confirmed"), [contributions]);
-
+  const isActive = useMemo(() => contributions.some(c => c.month_key===fmt.monthKey() && c.status==="confirmed"), [contributions]);
   const stats = useMemo(() => ({
     total: loans.length,
-    approved: loans.filter((l) => l.status === "approved").length,
-    borrowed: loans.filter((l) => l.status === "approved").reduce((s, l) => s + Number(l.amount), 0),
+    approved: loans.filter(l => l.status==="approved").length,
+    borrowed: loans.filter(l => l.status==="approved").reduce((s,l) => s+Number(l.amount), 0),
   }), [loans]);
+  const pendingCount = useMemo(() => loans.filter(l => l.status==="pending").length, [loans]);
 
-  const TABS = [["contribute","Contribute"],["loans","Loans"],["request","Request"],["community","Community"],["team","Team"]];
+  const TABS = [
+    ["contribute","Contribute",null],
+    ["loans","Loans", pendingCount||null],
+    ["request","Request",null],
+    ["people","People",null],
+    ["community","Community",null],
+    ["team","Team",null],
+  ];
 
   return (
-    <div className="dashboard">
-      {/* Top bar */}
-      <header className="dash-top">
+    <div className="dash-page">
+      <AnnouncementBanner ann={ann} />
+
+      <header className="dash-header">
         <div>
           <p className="dash-eyebrow">Welcome back</p>
           <h2 className="dash-name">{member.full_name}</h2>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:"0.75rem" }}>
+        <div style={{display:"flex",alignItems:"center",gap:"0.75rem"}}>
           <ActivePill active={isActive} />
-          <button className="link-muted" onClick={onLogout}>Sign out</button>
+          <button className="text-link" onClick={onLogout}>Sign out</button>
         </div>
       </header>
 
-      {/* Stats */}
-      <div className="stats-grid">
-        {[
-          { label:"Requests", value:stats.total },
-          { label:"Approved", value:stats.approved },
-          { label:"Borrowed", value:fmt.currency(stats.borrowed) },
-        ].map(({ label, value }) => (
-          <div key={label} className="stat-tile">
-            <span className="stat-val">{value}</span>
-            <span className="stat-lbl">{label}</span>
+      <div className="stats-row">
+        {[{l:"Requests",v:stats.total},{l:"Approved",v:stats.approved},{l:"Borrowed",v:fmt.currency(stats.borrowed)}].map(({l,v}) => (
+          <div key={l} className="stat-tile">
+            <span className="stat-val">{v}</span>
+            <span className="stat-lbl">{l}</span>
           </div>
         ))}
       </div>
 
-      {/* Tabs */}
       <nav className="tab-bar">
-        {TABS.map(([key, label]) => (
-          <button key={key} className={`tab-btn ${tab===key ? "tab-btn-active" : ""}`} onClick={() => setTab(key)}>{label}</button>
+        {TABS.map(([key,label,badge]) => (
+          <button key={key} className={`tab-btn ${tab===key?"tab-btn-active":""}`} onClick={() => setTab(key)}>
+            {label}{badge && <span className="tab-badge">{badge}</span>}
+          </button>
         ))}
       </nav>
 
-      {/* Content */}
-      <div className="tab-content">
-        {tab === "contribute" && <ContributionModule member={member} />}
-        {tab === "loans" && (
-          <div className="section-wrap">
-            {loansLoading ? <Spinner /> : loans.length === 0 ? (
-              <div className="empty">
+      <div className="tab-body">
+        {tab==="contribute" && <ContributionModule member={member} />}
+        {tab==="loans" && (
+          <div className="section-stack">
+            {loansLoading ? <Spinner /> : loans.length===0 ? (
+              <div className="empty-state">
                 <p>No loan requests yet.</p>
-                <button className="link-muted" onClick={() => setTab("request")}>Make your first request →</button>
+                <button className="text-link" onClick={() => setTab("request")}>Make your first request →</button>
               </div>
             ) : (
-              <div className="list-wrap">
-                {loans.map((loan) => (
-                  <div key={loan.id} className="list-row">
-                    <div className="list-info">
-                      <span className="list-title">{loan.description}</span>
-                      <span className="list-meta">{fmt.date(loan.created_at)}</span>
+              <div className="neu-list">
+                {loans.map(loan => (
+                  <div key={loan.id} className={`neu-list-row row-accent-${loan.status}`}>
+                    <div className="row-info">
+                      <span className="row-title">{loan.description}</span>
+                      <span className="row-meta">{fmt.date(loan.created_at)}</span>
                     </div>
-                    <div className="list-right">
-                      {loan.amount > 0 && <span className="list-amount">{fmt.currency(loan.amount)}</span>}
-                      <Badge status={loan.status} />
+                    <div className="row-right">
+                      {loan.amount > 0 && <span className="row-amount">{fmt.currency(loan.amount)}</span>}
+                      <StatusBadge status={loan.status} />
                     </div>
                   </div>
                 ))}
@@ -638,122 +749,161 @@ function DashboardPage({ member, onLogout }) {
             )}
           </div>
         )}
-        {tab === "request" && <LoanRequestModule member={member} isActive={isActive} />}
-        {tab === "community" && <CommunityModule />}
-        {tab === "team" && <ExecutivesModule />}
+        {tab==="request"   && <LoanModule member={member} isActive={isActive} />}
+        {tab==="people"    && <DirectoryModule />}
+        {tab==="community" && <CommunityModule />}
+        {tab==="team"      && <ExecutivesModule />}
       </div>
     </div>
   );
 }
 
+// ─── Admin Page ───────────────────────────────────────────────────────────────
 function AdminPage() {
-  const { loans, loading } = useAllLoans();
+  const { loans, loading, refetch } = useAllLoans();
   const [updating, setUpdating] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [search, setSearch] = useState("");
 
   const updateStatus = useCallback(async (id, status) => {
     setUpdating(id);
     await supabase.from("loan_requests").update({ status }).eq("id", id);
-    setUpdating(null);
-    window.location.reload();
-  }, []);
+    setUpdating(null); setConfirmId(null); setConfirmAction(null);
+    refetch();
+  }, [refetch]);
+
+  const doConfirm = (id, action) => {
+    if (confirmId===id && confirmAction===action) updateStatus(id, action==="approve"?"approved":"declined");
+    else { setConfirmId(id); setConfirmAction(action); }
+  };
 
   const grouped = useMemo(() => ({
-    pending: loans.filter((l) => l.status === "pending"),
-    other: loans.filter((l) => l.status !== "pending"),
+    pending: loans.filter(l => l.status==="pending"),
+    other:   loans.filter(l => l.status!=="pending"),
   }), [loans]);
 
+  const filter = (arr) => {
+    const q = search.toLowerCase().trim();
+    if (!q) return arr;
+    return arr.filter(l => l.members?.full_name?.toLowerCase().includes(q) || l.members?.phone?.includes(q) || l.description?.toLowerCase().includes(q));
+  };
+
+  const totalPending = useMemo(() => grouped.pending.reduce((s,l) => s+Number(l.amount), 0), [grouped.pending]);
+
   return (
-    <div className="dashboard">
-      <header className="dash-top">
+    <div className="dash-page">
+      <header className="dash-header">
         <div><p className="dash-eyebrow">Treasurer view</p><h2 className="dash-name">Loan Requests</h2></div>
-        <button className="link-muted" onClick={() => navigate("/")}>Sign out</button>
+        <button className="text-link" onClick={() => navigate("/")}>Sign out</button>
       </header>
+      {!loading && grouped.pending.length > 0 && (
+        <div className="stats-row" style={{marginBottom:"1.5rem"}}>
+          {[{l:"Pending",v:grouped.pending.length},{l:"Requested",v:fmt.currency(totalPending)},{l:"Reviewed",v:grouped.other.length}].map(({l,v}) => (
+            <div key={l} className="stat-tile"><span className="stat-val">{v}</span><span className="stat-lbl">{l}</span></div>
+          ))}
+        </div>
+      )}
+      {!loading && loans.length > 0 && (
+        <div style={{margin:"0 1.5rem 1.25rem"}}>
+          <input className="neu-input" placeholder="Search by name, phone, or description…" value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+      )}
       {loading ? <Spinner /> : (
-        <div className="section-wrap">
-          {grouped.pending.length > 0 && (
+        <div className="section-stack" style={{padding:"0 1.5rem"}}>
+          {filter(grouped.pending).length > 0 && (
             <>
-              <p className="module-label">Pending</p>
-              <div className="list-wrap" style={{ marginBottom:"2rem" }}>
-                {grouped.pending.map((loan) => (
-                  <div key={loan.id} className="list-row list-row-admin">
-                    <div className="list-info">
-                      <span className="list-title">{loan.description}</span>
-                      <span className="list-meta">{loan.members?.full_name} · {loan.members?.phone} · {fmt.date(loan.created_at)}</span>
+              <p className="section-label">Pending</p>
+              <div className="neu-list" style={{marginBottom:"1.5rem"}}>
+                {filter(grouped.pending).map(loan => {
+                  const isC = confirmId===loan.id;
+                  return (
+                    <div key={loan.id} className="neu-list-row" style={{flexWrap:"wrap"}}>
+                      <div className="row-info" style={{width:"100%",marginBottom:"0.5rem"}}>
+                        <span className="row-title">{loan.description}</span>
+                        <span className="row-meta">{loan.members?.full_name} · {loan.members?.phone}{loan.reg_number && ` · ${loan.reg_number}`} · {fmt.date(loan.created_at)}</span>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:"0.5rem",flexWrap:"wrap",justifyContent:"flex-end",width:"100%"}}>
+                        {loan.amount > 0 && <span className="row-amount">{fmt.currency(loan.amount)}</span>}
+                        <NeuBtn small variant={isC && confirmAction==="approve" ? "approve-confirm" : "approve"} loading={updating===loan.id} onClick={() => doConfirm(loan.id,"approve")}>
+                          {isC && confirmAction==="approve" ? "Sure?" : "Approve"}
+                        </NeuBtn>
+                        <NeuBtn small variant={isC && confirmAction==="decline" ? "decline-confirm" : "decline"} loading={updating===loan.id} onClick={() => doConfirm(loan.id,"decline")}>
+                          {isC && confirmAction==="decline" ? "Sure?" : "Decline"}
+                        </NeuBtn>
+                      </div>
                     </div>
-                    <div className="list-right" style={{ gap:"0.4rem", flexWrap:"wrap", justifyContent:"flex-end" }}>
-                      {loan.amount > 0 && <span className="list-amount">{fmt.currency(loan.amount)}</span>}
-                      <Btn variant="ghost" style={{ fontSize:"0.72rem", padding:"0.3rem 0.7rem", color:"#375534" }} loading={updating===loan.id} onClick={() => updateStatus(loan.id,"approved")}>Approve</Btn>
-                      <Btn variant="ghost" style={{ fontSize:"0.72rem", padding:"0.3rem 0.7rem", color:"#b94040" }} loading={updating===loan.id} onClick={() => updateStatus(loan.id,"declined")}>Decline</Btn>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {filter(grouped.other).length > 0 && (
+            <>
+              <p className="section-label">History</p>
+              <div className="neu-list">
+                {filter(grouped.other).map(loan => (
+                  <div key={loan.id} className={`neu-list-row row-accent-${loan.status}`}>
+                    <div className="row-info">
+                      <span className="row-title">{loan.description}</span>
+                      <span className="row-meta">{loan.members?.full_name} · {loan.members?.phone}{loan.reg_number && ` · ${loan.reg_number}`} · {fmt.date(loan.created_at)}</span>
+                    </div>
+                    <div className="row-right">
+                      {loan.amount > 0 && <span className="row-amount">{fmt.currency(loan.amount)}</span>}
+                      <StatusBadge status={loan.status} />
                     </div>
                   </div>
                 ))}
               </div>
             </>
           )}
-          {grouped.other.length > 0 && (
-            <>
-              <p className="module-label">History</p>
-              <div className="list-wrap">
-                {grouped.other.map((loan) => (
-                  <div key={loan.id} className="list-row">
-                    <div className="list-info">
-                      <span className="list-title">{loan.description}</span>
-                      <span className="list-meta">{loan.members?.full_name} · {loan.members?.phone} · {fmt.date(loan.created_at)}</span>
-                    </div>
-                    <div className="list-right">
-                      {loan.amount > 0 && <span className="list-amount">{fmt.currency(loan.amount)}</span>}
-                      <Badge status={loan.status} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-          {loans.length === 0 && <div className="empty"><p>No loan requests yet.</p></div>}
+          {loans.length===0 && <p className="empty-msg">No loan requests yet.</p>}
         </div>
       )}
     </div>
   );
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// ─── App Root ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [dark, setDark] = useDarkMode();
   const route = useRoute();
-  const [authedMember, setAuthedMember] = useState(() => {
-    try { return JSON.parse(sessionStorage.getItem("member")); } catch (err) { return null; }
-  });
+  const { session, authLoading } = useAuthSession();
+  const [member, setMember] = useState(null);
+  const [memberLoading, setMemberLoading] = useState(false);
 
-  const login = useCallback((member) => {
-    sessionStorage.setItem("member", JSON.stringify(member));
-    setAuthedMember(member);
+  useEffect(() => {
+    if (!session?.user?.email) { setMember(null); return; }
+    setMemberLoading(true);
+    supabase.from("members").select("*").eq("email", session.user.email).single()
+      .then(({ data }) => { setMember(data ?? null); setMemberLoading(false); });
+  }, [session]);
+
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setMember(null); navigate("/");
   }, []);
 
-  const logout = useCallback(() => {
-    sessionStorage.removeItem("member");
-    setAuthedMember(null);
-    navigate("/");
-  }, []);
+  const isTreasurer = session?.user?.email === CONFIG.treasurer.email;
 
-  const isTreasurer = authedMember?.phone === TREASURER_PHONE;
+  if (authLoading || memberLoading) return (
+    <><style>{CSS}</style><div style={{minHeight:"100svh",display:"flex",alignItems:"center",justifyContent:"center"}}><Spinner /></div></>
+  );
 
-  const page = useMemo(() => {
-    if (route === "/register") return <RegisterPage />;
+  const page = (() => {
+    if (!session) return <LandingPage />;
+    if (!member || !member.paid) return <RegisterPage session={session} />;
     if (route === "/admin") {
-      if (!authedMember || !isTreasurer) { navigate("/"); return null; }
+      if (!isTreasurer) { navigate("/dashboard"); return null; }
       return <AdminPage />;
     }
-    if (route === "/dashboard") {
-      if (!authedMember) { navigate("/"); return null; }
-      return <DashboardPage member={authedMember} onLogout={logout} />;
-    }
-    return <LandingPage onLogin={login} />;
-  }, [route, authedMember, isTreasurer, login, logout]);
+    return <DashboardPage member={member} onLogout={logout} />;
+  })();
 
   return (
     <>
       <style>{CSS}</style>
-      <DarkToggle dark={dark} onToggle={() => setDark((d) => !d)} />
+      <DarkToggle dark={dark} onToggle={() => setDark(d => !d)} />
       <main>{page}</main>
     </>
   );
@@ -761,429 +911,394 @@ export default function App() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700&family=Nunito+Sans:wght@300;400;600&display=swap');
 
-  /* ── Palette
-     #5D6B6B  slate-teal (darkest)
-     #6DD7D8  → actually the 5th pill reads #6DD7D8 — light teal
-     #D5E6E5  pale teal
-     #F1F7F7  near-white
-     #D0D9D4  silver
-     #F7CBCA  blush (lightest)
-  ── */
+  /* ─── Palette ───────────────────────────────────────────────────────────
+     Light: #e8ecef background, #ffffff surface, soft inset/outset shadows
+     Dark:  #1e2328 background, #252b31 surface, dark neumorphic shadows
+     Accent: #8b9dc3 (soft blue-grey), danger: #c0392b
+  ─── */
 
   :root {
-    --p1: #5D6B6B;
-    --p2: #7eaaaa;
-    --p3: #D5E6E5;
-    --p4: #F1F7F7;
-    --p5: #D0D9D4;
-    --p6: #F7CBCA;
+    --bg:        #e8ecef;
+    --surface:   #eef1f4;
+    --surface2:  #e2e6ea;
+    --fg:        #3a4048;
+    --fg2:       #5a636e;
+    --muted:     #8a949e;
+    --accent:    #8b9dc3;
+    --accent2:   #6b82b0;
+    --danger:    #c0392b;
+    --success:   #27ae60;
+    --border:    rgba(255,255,255,0.9);
 
-    /* Light — crisp white-teal world */
-    --bg:        #F1F7F7;
-    --bg2:       #E8F2F2;
-    --surface:   #ffffff;
-    --surface2:  #f4fafa;
-    --border:    rgba(93,107,107,0.12);
-    --border2:   rgba(93,107,107,0.22);
-    --fg:        #2c3d3d;
-    --fg2:       #3d5252;
-    --muted:     #7a9696;
-    --input-bg:  #ffffff;
-    --shadow:    0 1px 4px rgba(93,107,107,0.08), 0 6px 24px rgba(93,107,107,0.06);
-    --shadow-md: 0 4px 16px rgba(93,107,107,0.12), 0 12px 40px rgba(93,107,107,0.08);
-    --font-head: 'DM Serif Display', Georgia, serif;
-    --font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
-    --r:    20px;
-    --r-sm: 12px;
-    --t:    0.4s cubic-bezier(0.4,0,0.2,1);
-    --max:  720px;
+    /* Neumorphic shadows */
+    --neu-out:   6px 6px 14px #c8ccd0, -6px -6px 14px #ffffff;
+    --neu-in:    inset 4px 4px 10px #c8ccd0, inset -4px -4px 10px #ffffff;
+    --neu-out-sm:3px 3px 8px #c8ccd0, -3px -3px 8px #ffffff;
+    --neu-in-sm: inset 2px 2px 6px #c8ccd0, inset -2px -2px 6px #ffffff;
+    --neu-btn:   4px 4px 10px #c0c4c8, -4px -4px 10px #ffffff;
+    --neu-btn-hover: 6px 6px 14px #b8bcbf, -6px -6px 14px #ffffff;
+    --neu-btn-press: inset 3px 3px 8px #c0c4c8, inset -3px -3px 8px #ffffff;
+
+    --r:    22px;
+    --r-sm: 14px;
+    --r-xs: 10px;
+    --t:    0.3s cubic-bezier(0.4,0,0.2,1);
+    --max:  680px;
+
+    --font-head: 'Nunito', system-ui, sans-serif;
+    --font-body: 'Nunito Sans', system-ui, sans-serif;
   }
 
   [data-theme="dark"] {
-    /* Dark — deep slate world */
-    --bg:       #3d4f4f;
-    --bg2:      #344444;
-    --surface:  #4a5e5e;
-    --surface2: #526868;
-    --border:   rgba(209,230,229,0.10);
-    --border2:  rgba(209,230,229,0.20);
-    --fg:       #F1F7F7;
-    --fg2:      #D5E6E5;
-    --muted:    #9bbaba;
-    --input-bg: #4a5e5e;
-    --shadow:   0 1px 4px rgba(0,0,0,0.28), 0 6px 24px rgba(0,0,0,0.20);
-    --shadow-md:0 4px 16px rgba(0,0,0,0.35), 0 12px 40px rgba(0,0,0,0.25);
+    --bg:        #1e2328;
+    --surface:   #252b31;
+    --surface2:  #1a1f24;
+    --fg:        #dde3ea;
+    --fg2:       #9aa3ad;
+    --muted:     #6a747e;
+    --accent:    #7a91bc;
+    --accent2:   #5d7aaa;
+    --border:    rgba(255,255,255,0.05);
+
+    --neu-out:   6px 6px 14px #171c20, -6px -6px 14px #2d343c;
+    --neu-in:    inset 4px 4px 10px #171c20, inset -4px -4px 10px #2d343c;
+    --neu-out-sm:3px 3px 8px #171c20, -3px -3px 8px #2d343c;
+    --neu-in-sm: inset 2px 2px 6px #171c20, inset -2px -2px 6px #2d343c;
+    --neu-btn:   4px 4px 10px #171c20, -4px -4px 10px #2d343c;
+    --neu-btn-hover: 6px 6px 14px #131820, -6px -6px 14px #313940;
+    --neu-btn-press: inset 3px 3px 8px #171c20, inset -3px -3px 8px #2d343c;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html { font-size: 16px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  html { font-size: 16px; -webkit-font-smoothing: antialiased; }
   body {
     font-family: var(--font-body);
-    background: var(--bg);
-    color: var(--fg);
+    background: var(--bg); color: var(--fg);
     transition: background 0.5s cubic-bezier(0.4,0,0.2,1), color 0.4s ease;
-    min-height: 100svh;
-    overflow-x: hidden;
+    min-height: 100svh; overflow-x: hidden;
   }
 
-  /* ── Splash ── */
-  .splash {
-    min-height: 100svh;
-    display: flex; align-items: center; justify-content: center;
-    padding: 2rem 1.25rem;
-    position: relative; overflow: hidden;
+  /* ── Dark Toggle ── */
+  .theme-toggle {
+    position: fixed; top: 1.25rem; right: 1.25rem; z-index: 200;
+    width: 2.6rem; height: 1.4rem; border-radius: 999px;
+    background: var(--bg); border: none; cursor: pointer; padding: 0;
+    display: flex; align-items: center;
+    box-shadow: var(--neu-out-sm);
+    transition: box-shadow var(--t);
   }
-  .splash-bg {
-    position: absolute; inset: 0; z-index: 0;
-    background: linear-gradient(150deg,
-      var(--p1)  0%,
-      #527070   25%,
-      #7eaaaa   55%,
-      var(--p3) 80%,
-      var(--p6) 100%
-    );
+  .theme-toggle:active { box-shadow: var(--neu-in-sm); }
+  .theme-toggle-knob {
+    display: block; width: 0.95rem; height: 0.95rem; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+    transition: margin 0.25s cubic-bezier(0.4,0,0.2,1);
   }
-  [data-theme="dark"] .splash-bg {
-    background: linear-gradient(150deg,
-      #2a3838 0%,
-      var(--p1) 40%,
-      #527070  80%,
-      var(--p3) 100%
-    );
+
+  /* ── Spinner ── */
+  .spinner-wrap { display: flex; justify-content: center; padding: 3rem 0; }
+  .spinner { display: inline-block; width: 22px; height: 22px; border: 2.5px solid var(--surface2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+
+  /* ── Neu Card ── */
+  .neu-card {
+    background: var(--bg);
+    border-radius: var(--r);
+    box-shadow: var(--neu-out);
+    padding: 1.5rem;
+    transition: box-shadow var(--t);
   }
-  .splash-content {
-    position: relative; z-index: 1;
-    width: 100%; max-width: 420px;
-    text-align: center;
+  .neu-card-pressed { box-shadow: var(--neu-in); }
+
+  /* ── Neu Input ── */
+  .neu-field { display: flex; flex-direction: column; gap: 0.4rem; }
+  .neu-label { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 0.2rem; padding-left: 0.25rem; }
+  .neu-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); opacity: 0.7; }
+  .neu-error { font-size: 0.68rem; color: var(--danger); padding-left: 0.25rem; margin-top: 0.1rem; }
+  .neu-input {
+    width: 100%; padding: 0.85rem 1.1rem;
+    font-family: var(--font-body); font-size: 0.9rem; font-weight: 400;
+    color: var(--fg); background: var(--bg);
+    border: none; border-radius: var(--r-sm);
+    outline: none; resize: none;
+    -webkit-appearance: none;
+    box-shadow: var(--neu-in);
+    transition: box-shadow 0.25s;
   }
-  .splash-badge {
-    display: inline-block;
-    font-size: 0.63rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
-    color: rgba(241,247,247,0.85);
-    background: rgba(255,255,255,0.12);
-    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 999px; padding: 0.3rem 1rem;
-    margin-bottom: 1.75rem;
+  .neu-input:focus { box-shadow: var(--neu-in), 0 0 0 2px var(--accent); }
+  .neu-input::placeholder { color: var(--muted); }
+  .neu-textarea { min-height: 88px; line-height: 1.55; }
+  .dir-search { padding: 0.6rem 0.9rem; font-size: 0.82rem; border-radius: var(--r-xs); }
+
+  /* ── Neu Button ── */
+  .neu-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.6rem;
+    padding: 0.85rem 1.6rem;
+    font-family: var(--font-body); font-size: 0.875rem; font-weight: 600;
+    border-radius: var(--r-sm); border: none;
+    cursor: pointer; white-space: nowrap; text-decoration: none;
+    background: var(--bg);
+    box-shadow: var(--neu-btn);
+    color: var(--fg2);
+    transition: box-shadow var(--t), color var(--t), transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
   }
+  .neu-btn:hover:not(:disabled) { box-shadow: var(--neu-btn-hover); }
+  .neu-btn:active:not(:disabled) { box-shadow: var(--neu-btn-press); transform: scale(0.99); }
+  .neu-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .neu-btn-full { width: 100%; }
+  .neu-btn-small { padding: 0.5rem 1rem; font-size: 0.78rem; border-radius: var(--r-xs); }
+
+  .neu-btn-primary { color: var(--accent2); font-weight: 700; }
+  .neu-btn-google { color: var(--fg); font-weight: 600; }
+  .neu-btn-ghost { color: var(--muted); box-shadow: var(--neu-out-sm); }
+  .neu-btn-accent {
+    background: var(--accent); color: #ffffff;
+    box-shadow: 4px 4px 10px rgba(107,130,176,0.4), -2px -2px 8px rgba(255,255,255,0.3);
+  }
+  .neu-btn-accent:hover:not(:disabled) {
+    box-shadow: 6px 6px 14px rgba(107,130,176,0.5), -2px -2px 8px rgba(255,255,255,0.3);
+  }
+  .neu-btn-approve { color: var(--success); }
+  .neu-btn-approve-confirm { background: var(--success); color: #fff; box-shadow: 3px 3px 8px rgba(39,174,96,0.35), -2px -2px 6px rgba(255,255,255,0.3); }
+  .neu-btn-decline { color: var(--danger); }
+  .neu-btn-decline-confirm { background: var(--danger); color: #fff; box-shadow: 3px 3px 8px rgba(192,57,43,0.35), -2px -2px 6px rgba(255,255,255,0.3); }
+
+  .btn-spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+
+  /* ── Status Badge ── */
+  .status-badge { font-size: 0.63rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; padding: 0.22rem 0.65rem; border-radius: 999px; flex-shrink: 0; }
+  .status-approved { color: var(--success); background: rgba(39,174,96,0.1); }
+  .status-pending  { color: var(--accent2); background: rgba(139,157,195,0.12); }
+  .status-declined { color: var(--danger);  background: rgba(192,57,43,0.1); }
+
+  /* ── Active Pill ── */
+  .active-pill { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.28rem 0.7rem; border-radius: 999px; flex-shrink: 0; background: var(--bg); box-shadow: var(--neu-out-sm); }
+  .active-pip { width: 6px; height: 6px; border-radius: 50%; }
+  .active-pill-on  { color: var(--success); }
+  .active-pill-on  .active-pip { background: var(--success); box-shadow: 0 0 4px var(--success); }
+  .active-pill-off { color: var(--muted); }
+  .active-pill-off .active-pip { background: var(--muted); }
+
+  /* ── Notices ── */
+  .inline-notice { border-radius: var(--r-sm); padding: 0.9rem 1.1rem; font-size: 0.82rem; line-height: 1.55; }
+  .inline-success { background: rgba(39,174,96,0.08); box-shadow: inset 2px 2px 5px rgba(39,174,96,0.06), inset -1px -1px 3px rgba(255,255,255,0.5); color: var(--fg2); }
+  .inline-success strong { color: var(--success); }
+  .inline-warn { background: rgba(192,57,43,0.06); box-shadow: inset 2px 2px 5px rgba(192,57,43,0.05), inset -1px -1px 3px rgba(255,255,255,0.5); color: var(--fg2); }
+  .inline-warn strong { color: var(--danger); }
+
+  /* ── Text Link ── */
+  .text-link { background: none; border: none; cursor: pointer; font-family: var(--font-body); font-size: 0.79rem; color: var(--accent); text-decoration: none; padding: 0; display: inline; }
+  .text-link:hover { text-decoration: underline; }
+
+  /* ── Announcement ── */
+  .ann-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1.5rem; background: var(--bg); box-shadow: inset 0 -1px 0 rgba(0,0,0,0.06); max-width: var(--max); margin: 0 auto; }
+  .ann-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 0.35rem; animation: pulse 2s ease-in-out infinite; }
+  .ann-text { display: flex; flex-direction: column; gap: 0.12rem; flex: 1; min-width: 0; }
+  .ann-title { font-size: 0.82rem; font-weight: 600; }
+  .ann-body  { font-size: 0.74rem; color: var(--muted); line-height: 1.4; }
+  .ann-close { background: none; border: none; cursor: pointer; color: var(--muted); padding: 0.2rem; border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .ann-close:hover { color: var(--fg); }
+
+  /* ── Splash / Auth ── */
+  .splash-page {
+    min-height: 100svh; display: flex; align-items: center; justify-content: center;
+    padding: 2rem 1.5rem; background: var(--bg);
+  }
+  .splash-center { width: 100%; max-width: 400px; text-align: center; }
+  .splash-brand { margin-bottom: 2.5rem; }
+  .splash-eyebrow { font-size: 0.63rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem; }
   .splash-title {
     font-family: var(--font-head);
-    font-size: clamp(2rem, 7vw, 4rem);
-    font-weight: 400; line-height: 1.08;
-    letter-spacing: -0.01em;
-    color: #F1F7F7;
-    margin-bottom: 0.75rem;
+    font-size: clamp(1.8rem, 6vw, 3rem);
+    font-weight: 700; letter-spacing: -0.02em; line-height: 1.1;
+    color: var(--fg); margin-bottom: 0.6rem;
   }
-  .splash-tagline {
-    font-size: 0.95rem; font-weight: 300;
-    color: rgba(213,230,229,0.85);
-    margin-bottom: 2.5rem; letter-spacing: 0.02em;
-  }
-  .auth-card {
-    background: rgba(255,255,255,0.10);
-    backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: var(--r); padding: 1.75rem;
-    display: flex; flex-direction: column; gap: 1rem;
-    text-align: left;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
-  }
-  [data-theme="dark"] .auth-card { background: rgba(42,56,56,0.7); border-color: rgba(209,230,229,0.14); }
-  .auth-card .input { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.18); color: #F1F7F7; }
-  .auth-card .input::placeholder { color: rgba(209,230,229,0.5); }
-  .auth-card .input:focus { border-color: rgba(255,255,255,0.5); box-shadow: 0 0 0 3px rgba(255,255,255,0.08); }
-  .auth-card .field-label { color: rgba(209,230,229,0.75); }
-  .auth-card .field-error { color: var(--p6); }
-  .auth-foot { font-size: 0.79rem; color: rgba(209,230,229,0.75); text-align: center; }
-  .auth-foot .link { color: rgba(241,247,247,0.9); }
+  .splash-tagline { font-size: 0.95rem; font-weight: 300; color: var(--muted); letter-spacing: 0.01em; }
+  .auth-panel { display: flex; flex-direction: column; gap: 1.1rem; padding: 2rem; }
+  .auth-hint { font-size: 0.76rem; color: var(--muted); text-align: center; }
+
+  .google-identity { display: flex; align-items: center; gap: 0.85rem; padding: 0.9rem 1rem; border-radius: var(--r-xs); box-shadow: var(--neu-in-sm); }
+  .google-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+  .google-name  { font-size: 0.87rem; font-weight: 700; margin-bottom: 0.1rem; }
+  .google-email { font-size: 0.7rem; color: var(--muted); }
 
   /* ── Dashboard ── */
-  .dashboard { max-width: var(--max); margin: 0 auto; padding: 0 0 6rem; }
-  .dash-top {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 3rem 1.5rem 1.5rem; gap: 1rem;
-  }
-  .dash-eyebrow {
-    font-size: 0.63rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--muted); margin-bottom: 0.25rem;
-  }
-  .dash-name {
-    font-family: var(--font-head);
-    font-size: clamp(1.5rem, 5vw, 2.4rem);
-    font-weight: 400; letter-spacing: -0.01em; line-height: 1.1;
-  }
+  .dash-page { max-width: var(--max); margin: 0 auto; padding: 0 0 6rem; }
+  .dash-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 3rem 1.5rem 1.5rem; gap: 1rem; }
+  .dash-eyebrow { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.2rem; }
+  .dash-name { font-family: var(--font-head); font-size: clamp(1.5rem,5vw,2.2rem); font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; }
 
   /* ── Stats ── */
-  .stats-grid {
-    display: grid; grid-template-columns: repeat(3, 1fr);
-    gap: 1px; background: var(--border);
-    margin: 0 1.5rem 1.5rem;
-    border-radius: var(--r); overflow: hidden;
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow);
-  }
-  .stat-tile { background: var(--surface); padding: 1.1rem 1rem; transition: background var(--t); }
-  .stat-val { display: block; font-size: 1.05rem; font-weight: 600; color: var(--p1); margin-bottom: 0.15rem; }
-  [data-theme="dark"] .stat-val { color: var(--p3); }
-  .stat-lbl { display: block; font-size: 0.6rem; font-weight: 600; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+  .stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.75rem; margin: 0 1.5rem 1.5rem; }
+  .stat-tile { background: var(--bg); border-radius: var(--r-sm); padding: 1rem; box-shadow: var(--neu-out-sm); text-align: center; }
+  .stat-val { display: block; font-size: 1rem; font-weight: 700; color: var(--fg); margin-bottom: 0.1rem; }
+  .stat-lbl { display: block; font-size: 0.58rem; font-weight: 700; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
 
-  /* ── Tab Bar ── */
+  /* ── Tabs ── */
   .tab-bar {
-    display: flex; gap: 0.2rem;
-    margin: 0 1.5rem 1.5rem;
-    background: var(--surface); border-radius: var(--r-sm);
-    padding: 0.22rem; border: 1px solid var(--border);
+    display: flex; gap: 0; margin: 0 1.5rem 1.5rem;
+    background: var(--bg); border-radius: var(--r-sm); padding: 0.3rem;
+    box-shadow: var(--neu-in);
     overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-    box-shadow: var(--shadow);
   }
   .tab-bar::-webkit-scrollbar { display: none; }
   .tab-btn {
-    flex: 1; min-width: fit-content;
-    padding: 0.52rem 0.9rem;
-    font-family: var(--font-body); font-size: 0.76rem; font-weight: 500;
+    flex: 1; min-width: fit-content; padding: 0.5rem 0.8rem;
+    font-family: var(--font-body); font-size: 0.75rem; font-weight: 600;
     color: var(--muted); background: transparent;
-    border: none; border-radius: 9px;
+    border: none; border-radius: var(--r-xs);
     cursor: pointer; white-space: nowrap;
     transition: all var(--t);
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
   }
   .tab-btn-active {
-    background: linear-gradient(135deg, var(--p1) 0%, #527070 100%);
-    color: var(--p4); font-weight: 600;
-    box-shadow: 0 2px 8px rgba(93,107,107,0.25);
+    background: var(--bg);
+    color: var(--accent2);
+    box-shadow: var(--neu-out-sm);
   }
-  [data-theme="dark"] .tab-btn-active { background: linear-gradient(135deg, #2a3838 0%, var(--p1) 100%); color: var(--p3); }
-  .tab-content { padding: 0 1.5rem; }
+  .tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; font-size: 0.58rem; font-weight: 700; background: var(--accent); color: #fff; border-radius: 999px; }
+  .tab-body { padding: 0 1.5rem; }
 
-  /* ── Cards & Sections ── */
-  .section-wrap { display: flex; flex-direction: column; gap: 1.1rem; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 1.5rem; box-shadow: var(--shadow); }
-  .card-form { display: flex; flex-direction: column; gap: 1rem; }
-  .module-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem; }
+  /* ── Section ── */
+  .section-stack { display: flex; flex-direction: column; gap: 1.1rem; }
+  .section-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem; }
+  .form-stack { display: flex; flex-direction: column; gap: 1rem; }
 
   /* ── Status Card ── */
-  .status-card { border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow-md); }
-  .status-card-active {
-    background: linear-gradient(140deg, var(--p1) 0%, #527272 45%, var(--p2) 100%);
+  .contrib-hero {
+    border-radius: var(--r); padding: 1.75rem;
+    box-shadow: var(--neu-out);
   }
-  .status-card-due { background: var(--surface); border: 1px solid var(--border); }
-  .status-card-inner { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.75rem; }
-  .status-month { font-size: 0.63rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.4rem; }
-  .status-card-active .status-month { color: rgba(213,230,229,0.75); }
-  .status-card-due   .status-month { color: var(--muted); }
-  .status-heading {
-    font-family: var(--font-head);
-    font-size: clamp(1.25rem, 4vw, 1.7rem);
-    font-weight: 400; line-height: 1.1; margin-bottom: 0.4rem;
+  .contrib-hero-paid {
+    background: linear-gradient(135deg, var(--accent2) 0%, var(--accent) 100%);
+    box-shadow: 6px 6px 16px rgba(107,130,176,0.4), -4px -4px 12px rgba(255,255,255,0.3);
   }
-  .status-card-active .status-heading { color: var(--p4); }
-  .status-card-due   .status-heading { color: var(--fg); }
-  .status-sub { font-size: 0.78rem; font-weight: 300; }
-  .status-card-active .status-sub { color: rgba(213,230,229,0.7); }
-  .status-card-due   .status-sub { color: var(--muted); }
-  .status-check {
-    display: flex; align-items: center; gap: 0.5rem;
-    font-size: 0.77rem; font-weight: 500;
-    color: rgba(213,230,229,0.75);
-    padding: 0.75rem 1.75rem;
-    border-top: 1px solid rgba(255,255,255,0.1);
-  }
+  .contrib-hero-due { background: var(--bg); }
+  .contrib-hero-inner { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .contrib-month { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.35rem; }
+  .contrib-hero-paid .contrib-month { color: rgba(255,255,255,0.65); }
+  .contrib-hero-due  .contrib-month { color: var(--muted); }
+  .contrib-heading { font-family: var(--font-head); font-size: clamp(1.25rem,4vw,1.65rem); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 0.35rem; }
+  .contrib-hero-paid .contrib-heading { color: #fff; }
+  .contrib-hero-due  .contrib-heading { color: var(--fg); }
+  .contrib-sub { font-size: 0.77rem; font-weight: 400; }
+  .contrib-hero-paid .contrib-sub { color: rgba(255,255,255,0.7); }
+  .contrib-hero-due  .contrib-sub { color: var(--muted); }
+  .contrib-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; font-weight: 600; color: rgba(255,255,255,0.75); padding: 0.75rem 1.75rem; border-top: 1px solid rgba(255,255,255,0.15); margin: 0 -1.75rem -1.75rem; }
 
-  /* ── Pay block ── */
-  .pay-hint { font-size: 0.72rem; color: var(--muted); text-align: center; line-height: 1.45; margin-top: 0.25rem; }
+  /* ── Streak ── */
+  .streak-card { padding: 1.25rem 1.5rem; }
+  .streak-row { display: flex; gap: 0.5rem; align-items: flex-end; margin-bottom: 0.65rem; }
+  .streak-item { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; flex: 1; }
+  .streak-pip { width: 100%; max-width: 36px; aspect-ratio: 1; border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+  .streak-pip-paid { background: linear-gradient(135deg, var(--accent2), var(--accent)); color: #fff; box-shadow: 3px 3px 8px rgba(107,130,176,0.35), -2px -2px 5px rgba(255,255,255,0.3); }
+  .streak-pip-empty { background: var(--bg); box-shadow: var(--neu-in-sm); }
+  .streak-lbl { font-size: 0.58rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); text-transform: uppercase; }
+  .streak-msg { font-size: 0.73rem; color: var(--muted); }
+
+  /* ── Pay ── */
+  .pay-hint { font-size: 0.72rem; color: var(--muted); text-align: center; line-height: 1.45; margin-top: 0.6rem; }
   .waiting-row { display: flex; align-items: center; gap: 0.9rem; }
-  .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--p2); flex-shrink: 0; animation: pulse 1.7s ease-in-out infinite; }
-  .waiting-title { font-size: 0.88rem; font-weight: 600; margin-bottom: 0.15rem; }
-  .waiting-sub { font-size: 0.74rem; color: var(--muted); line-height: 1.4; }
-
-  /* ── Notices ── */
-  .notice { border-radius: var(--r-sm); padding: 1rem 1.25rem; }
-  .notice-success { background: rgba(125,180,180,0.12); border: 1px solid rgba(125,180,180,0.25); }
-  .notice-warn { background: rgba(247,203,202,0.15); border: 1px solid rgba(247,203,202,0.35); }
-  .notice-title { font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem; }
-  .notice-success .notice-title { color: var(--p1); }
-  [data-theme="dark"] .notice-success .notice-title { color: var(--p3); }
-  .notice-warn .notice-title { color: #b06060; }
-  [data-theme="dark"] .notice-warn .notice-title { color: var(--p6); }
-  .notice-body { font-size: 0.76rem; color: var(--muted); line-height: 1.55; }
+  .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: pulse 1.7s ease-in-out infinite; }
+  .waiting-title { font-size: 0.87rem; font-weight: 700; margin-bottom: 0.12rem; }
+  .waiting-sub { font-size: 0.73rem; color: var(--muted); line-height: 1.4; }
 
   /* ── Gate ── */
-  .gate-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r); padding: 2.75rem 1.5rem;
-    text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.9rem;
-  }
-  .gate-icon {
-    width: 52px; height: 52px; border-radius: 50%;
-    background: rgba(125,170,170,0.12); border: 1px solid var(--border2);
-    display: flex; align-items: center; justify-content: center; color: var(--p2);
-  }
-  .gate-title { font-family: var(--font-head); font-size: 1.2rem; font-weight: 400; }
-  .gate-sub { font-size: 0.81rem; color: var(--muted); line-height: 1.55; max-width: 280px; }
+  .gate-card { text-align: center; padding: 2.5rem 1.5rem; }
+  .gate-icon { width: 52px; height: 52px; border-radius: 50%; background: var(--bg); box-shadow: var(--neu-out-sm); display: flex; align-items: center; justify-content: center; color: var(--muted); margin: 0 auto 0.9rem; }
+  .gate-title { font-family: var(--font-head); font-size: 1.15rem; font-weight: 700; margin-bottom: 0.4rem; }
+  .gate-sub { font-size: 0.8rem; color: var(--muted); line-height: 1.55; max-width: 260px; margin: 0 auto; }
 
-  /* ── List ── */
-  .list-wrap { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); }
-  .list-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; background: var(--surface); padding: 1rem 1.25rem; transition: background 0.2s; }
-  .list-row:hover { background: var(--surface2); }
-  .list-row-admin { flex-wrap: wrap; }
-  .list-info { display: flex; flex-direction: column; gap: 0.2rem; flex: 1 1 0; min-width: 0; }
-  .list-title { font-size: 0.84rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .list-meta { font-size: 0.65rem; color: var(--muted); }
-  .list-right { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
-  .list-amount { font-size: 0.84rem; font-weight: 700; color: var(--p1); }
-  [data-theme="dark"] .list-amount { color: var(--p3); }
+  /* ── Neu List ── */
+  .neu-list { display: flex; flex-direction: column; gap: 0.6rem; }
+  .neu-list-row {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+    background: var(--bg); padding: 1rem 1.25rem;
+    border-radius: var(--r-sm);
+    box-shadow: var(--neu-out-sm);
+    transition: box-shadow var(--t);
+    position: relative; overflow: hidden;
+  }
+  .neu-list-row:hover { box-shadow: var(--neu-btn-hover); }
+
+  /* Status accent pip */
+  .row-accent-approved::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--success); border-radius: 3px 0 0 3px; }
+  .row-accent-declined::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--danger); border-radius: 3px 0 0 3px; }
+  .row-accent-pending::before  { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--accent); border-radius: 3px 0 0 3px; }
+
+  .row-info { display: flex; flex-direction: column; gap: 0.18rem; flex: 1; min-width: 0; }
+  .row-title { font-size: 0.84rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-meta  { font-size: 0.64rem; color: var(--muted); line-height: 1.35; }
+  .row-right { display: flex; align-items: center; gap: 0.55rem; flex-shrink: 0; }
+  .row-amount { font-size: 0.84rem; font-weight: 700; color: var(--fg); }
 
   /* ── Community ── */
-  .community-card { display: flex; flex-direction: column; gap: 1.25rem; }
-  .community-heading {
-    font-family: var(--font-head);
-    font-size: clamp(1.05rem, 3vw, 1.3rem);
-    font-weight: 400; font-style: italic;
-    line-height: 1.55; color: var(--fg);
-  }
-  .benefit-list { display: flex; flex-direction: column; gap: 0.75rem; }
-  .benefit-row { display: flex; align-items: flex-start; gap: 0.75rem; font-size: 0.82rem; color: var(--muted); line-height: 1.55; }
-  .benefit-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--p2); flex-shrink: 0; margin-top: 0.5rem; }
+  .community-card { display: flex; flex-direction: column; gap: 1.1rem; }
+  .community-title { font-family: var(--font-head); font-size: clamp(1rem,3vw,1.2rem); font-weight: 400; font-style: italic; line-height: 1.55; color: var(--fg2); }
+  .benefit-stack { display: flex; flex-direction: column; gap: 0.7rem; }
+  .benefit-row { display: flex; align-items: flex-start; gap: 0.75rem; font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
+  .benefit-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 0.5rem; }
 
   .wa-card {
-    background: linear-gradient(140deg, var(--p1) 0%, #527272 60%, var(--p2) 100%);
+    background: linear-gradient(135deg, var(--accent2) 0%, var(--accent) 100%);
     border-radius: var(--r); padding: 1.75rem;
     display: flex; align-items: center; justify-content: space-between;
-    gap: 1.5rem; flex-wrap: wrap; box-shadow: var(--shadow-md);
+    gap: 1.5rem; flex-wrap: wrap;
+    box-shadow: 6px 6px 16px rgba(107,130,176,0.4), -4px -4px 12px rgba(255,255,255,0.25);
   }
-  .wa-heading { font-family: var(--font-head); font-size: 1.2rem; font-weight: 400; color: var(--p4); margin-bottom: 0.3rem; }
-  .wa-sub { font-size: 0.77rem; color: rgba(213,230,229,0.75); line-height: 1.4; }
-  .btn-wa {
-    display: inline-flex; align-items: center; justify-content: center;
-    padding: 0.72rem 1.5rem;
-    background: var(--p6); color: var(--p1);
-    font-family: var(--font-body); font-size: 0.84rem; font-weight: 600;
-    border-radius: var(--r-sm); text-decoration: none; border: none;
-    cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: opacity var(--t), transform 0.1s;
-  }
-  .btn-wa:hover { opacity: 0.88; }
-  .btn-wa:active { transform: scale(0.97); }
+  .wa-title { font-family: var(--font-head); font-size: 1.15rem; font-weight: 700; color: #fff; margin-bottom: 0.25rem; }
+  .wa-sub { font-size: 0.76rem; color: rgba(255,255,255,0.7); line-height: 1.4; }
 
-  .dev-card {
-    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-    padding: 1.1rem 1.25rem;
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
-  }
-  .dev-name { font-size: 0.84rem; font-weight: 600; margin-bottom: 0.1rem; }
-  .dev-desc { font-size: 0.71rem; color: var(--muted); }
+  .dev-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .dev-name { font-size: 0.83rem; font-weight: 700; margin-bottom: 0.1rem; }
+  .dev-desc { font-size: 0.7rem; color: var(--muted); }
 
   /* ── Executives ── */
-  .exec-grid {
-    display: grid; grid-template-columns: repeat(2, 1fr);
-    gap: 1px; background: var(--border);
-    border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
-    box-shadow: var(--shadow);
-  }
-  .exec-card { background: var(--surface); padding: 1.6rem 1rem; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.6rem; transition: background 0.2s; }
-  .exec-card:hover { background: var(--surface2); }
-  .exec-avatar-wrap { width: 70px; height: 70px; }
-  .exec-avatar { width: 70px; height: 70px; border-radius: 50%; object-fit: cover; border: 2.5px solid var(--border2); }
-  .exec-initials {
-    width: 70px; height: 70px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--p1), var(--p2));
-    color: var(--p4); font-size: 1.1rem; font-weight: 600;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .exec-name { font-size: 0.84rem; font-weight: 600; }
-  .exec-role { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--p2); }
-  [data-theme="dark"] .exec-role { color: var(--p3); }
-  .exec-bio { font-size: 0.7rem; color: var(--muted); line-height: 1.45; }
+  .exec-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 0.75rem; }
+  .exec-card { padding: 1.5rem 1rem; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.55rem; }
+  .exec-avatar-wrap { width: 68px; height: 68px; }
+  .exec-avatar { width: 68px; height: 68px; border-radius: 50%; object-fit: cover; box-shadow: var(--neu-out-sm); }
+  .exec-initials { width: 68px; height: 68px; border-radius: 50%; background: var(--bg); box-shadow: var(--neu-out-sm); color: var(--accent2); font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .exec-name { font-size: 0.83rem; font-weight: 700; }
+  .exec-role { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  .exec-bio  { font-size: 0.69rem; color: var(--muted); line-height: 1.4; }
 
-  /* ── Pill ── */
-  .pill { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.67rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.28rem 0.7rem; border-radius: 999px; flex-shrink: 0; }
-  .pill-dot { width: 6px; height: 6px; border-radius: 50%; }
-  .pill-active { color: var(--p4); background: rgba(255,255,255,0.15); }
-  .pill-active .pill-dot { background: var(--p4); box-shadow: 0 0 0 2px rgba(241,247,247,0.2); }
-  .pill-inactive { color: var(--muted); background: rgba(93,107,107,0.10); }
-  .pill-inactive .pill-dot { background: var(--muted); }
-  .dash-top .pill-active { color: var(--p1); background: rgba(125,170,170,0.15); }
-  .dash-top .pill-active .pill-dot { background: var(--p2); box-shadow: 0 0 0 2px rgba(125,170,170,0.2); }
-  [data-theme="dark"] .dash-top .pill-active { color: var(--p3); background: rgba(125,170,170,0.15); }
-  [data-theme="dark"] .dash-top .pill-active .pill-dot { background: var(--p3); }
+  /* ── Directory ── */
+  .dir-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .dir-count { font-size: 0.74rem; color: var(--muted); }
+  .dir-avatar { width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; background: var(--bg); box-shadow: var(--neu-out-sm); color: var(--accent2); font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 
-  /* ── Inputs ── */
-  .field { display: flex; flex-direction: column; gap: 0.42rem; }
-  .field-label { font-size: 0.71rem; font-weight: 500; letter-spacing: 0.03em; color: var(--muted); display: flex; align-items: center; gap: 0.2rem; }
-  .field-hint { font-weight: 400; color: var(--p5); font-size: 0.67rem; }
-  .field-error { font-size: 0.68rem; color: #b06060; margin-top: 0.1rem; }
-  .input {
-    width: 100%; padding: 0.8rem 1rem;
-    font-family: var(--font-body); font-size: 0.9rem;
-    color: var(--fg); background: var(--input-bg);
-    border: 1.5px solid var(--border); border-radius: var(--r-sm);
-    outline: none; resize: none; -webkit-appearance: none;
-    transition: border-color 0.25s, box-shadow 0.25s;
-  }
-  .input:focus { border-color: var(--p2); box-shadow: 0 0 0 3px rgba(125,170,170,0.14); }
-  .input::placeholder { color: var(--p5); }
-  .textarea { min-height: 84px; line-height: 1.55; }
-
-  /* ── Buttons ── */
-  .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
-    padding: 0.8rem 1.5rem;
-    font-family: var(--font-body); font-size: 0.875rem; font-weight: 600;
-    border-radius: var(--r-sm); border: 1.5px solid transparent;
-    cursor: pointer; white-space: nowrap; text-decoration: none;
-    transition: opacity var(--t), transform 0.12s, box-shadow var(--t);
-    -webkit-tap-highlight-color: transparent;
-  }
-  .btn:active { transform: scale(0.97); }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-  .btn-full { width: 100%; }
-  .btn-primary {
-    background: linear-gradient(135deg, var(--p1) 0%, #527070 100%);
-    color: var(--p4);
-    box-shadow: 0 2px 8px rgba(93,107,107,0.25);
-  }
-  .btn-primary:hover:not(:disabled) { opacity: 0.88; box-shadow: 0 4px 16px rgba(93,107,107,0.3); }
-  .btn-ghost { background: transparent; border-color: var(--border2); color: var(--fg); }
-  .btn-ghost:hover:not(:disabled) { background: var(--surface2); }
-  .btn-sm { padding: 0.45rem 1rem; font-size: 0.77rem; }
-  .btn-spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
-  /* Splash primary uses blush */
-  .splash-content .btn-primary { background: var(--p6); color: var(--p1); box-shadow: 0 2px 12px rgba(247,203,202,0.4); }
-  .splash-content .btn-primary:hover:not(:disabled) { opacity: 0.9; }
-
-  /* ── Links ── */
-  .link { background: none; border: none; cursor: pointer; font-family: var(--font-body); font-size: inherit; color: var(--p2); text-decoration: underline; text-underline-offset: 2px; padding: 0; }
-  .link-muted { background: none; border: none; cursor: pointer; font-family: var(--font-body); font-size: 0.78rem; color: var(--muted); padding: 0; text-decoration: none; transition: color 0.2s; }
-  .link-muted:hover { color: var(--fg); }
-  .empty { color: var(--muted); font-size: 0.875rem; padding: 3rem 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+  /* ── Misc ── */
+  .empty-state { color: var(--muted); font-size: 0.875rem; padding: 3rem 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+  .empty-msg { text-align: center; color: var(--muted); font-size: 0.82rem; padding: 2rem 0; }
 
   /* ── Animations ── */
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.75); } }
-  @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
-  .section-wrap > * { animation: fadeUp 0.28s ease both; }
-  .section-wrap > *:nth-child(2) { animation-delay: 0.06s; }
-  .section-wrap > *:nth-child(3) { animation-delay: 0.12s; }
-  .section-wrap > *:nth-child(4) { animation-delay: 0.18s; }
+  @keyframes spin  { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.45;transform:scale(0.78);} }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);} }
+  .section-stack > * { animation: fadeUp 0.26s ease both; }
+  .section-stack > *:nth-child(2) { animation-delay: 0.06s; }
+  .section-stack > *:nth-child(3) { animation-delay: 0.12s; }
+  .section-stack > *:nth-child(4) { animation-delay: 0.18s; }
 
   /* ── Responsive ── */
   @media (min-width: 640px) {
-    .dashboard { padding-bottom: 4rem; }
-    .dash-top { padding: 3.5rem 2rem 1.75rem; }
-    .stats-grid { margin: 0 2rem 1.75rem; }
+    .dash-header { padding: 3.5rem 2rem 1.75rem; }
+    .stats-row { margin: 0 2rem 1.75rem; }
     .tab-bar { margin: 0 2rem 1.75rem; }
-    .tab-content { padding: 0 2rem; }
+    .tab-body { padding: 0 2rem; }
     .exec-grid { grid-template-columns: repeat(4,1fr); }
     .wa-card { flex-wrap: nowrap; }
   }
   @media (max-width: 400px) {
-    .tab-btn { font-size: 0.71rem; padding: 0.45rem 0.5rem; }
-    .list-right { flex-direction: column; align-items: flex-end; gap: 0.3rem; }
-    .dash-name { font-size: 1.45rem; }
+    .tab-btn { font-size: 0.7rem; padding: 0.45rem 0.55rem; }
+    .row-right { flex-direction: column; align-items: flex-end; gap: 0.3rem; }
+    .dash-name { font-size: 1.4rem; }
+    .dir-search { width: 100%; }
   }
   @media (hover: none) {
-    .list-row:hover { background: var(--surface); }
-    .exec-card:hover { background: var(--surface); }
+    .neu-list-row:hover { box-shadow: var(--neu-out-sm); }
   }
 `;
