@@ -33,7 +33,7 @@ const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.anonKey);
 const fmt = {
   currency: (n) => `KSh ${Number(n).toLocaleString()}`,
   date: (d) => new Date(d).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" }),
-  phone: (p) => p.replace(/\D/g, "").replace(/^0/, "254"),
+  phone: (p) => (p ?? "").replace(/\D/g, "").replace(/^0/, "254"),
   monthKey: (offset = 0) => { const n = new Date(); n.setMonth(n.getMonth() + offset); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; },
   monthLabel: (key) => { const d = key ? new Date(key+"-01") : new Date(); return d.toLocaleDateString("en-KE", { month: "long", year: "numeric" }); },
   shortMonth: (key) => new Date(key+"-01").toLocaleDateString("en-KE", { month: "short" }),
@@ -237,16 +237,19 @@ function ContributionStreak({ contributions }) {
 }
 
 // ─── Contribution Module ──────────────────────────────────────────────────────
-function ContributionModule({ member }) {
+function ContributionModule({ member, onPhoneAdded }) {
   const { contributions, loading, refetch } = useContributions(member.id);
   const [step, setStep] = useState("idle");
   const [paying, setPaying] = useState(false);
   const [notSafaricom, setNotSafaricom] = useState(false);
   const [pollCount, setPollCount] = useState(0);
+  const [phoneInput, setPhoneInput] = useState("");
+  const [savingPhone, setSavingPhone] = useState(false);
 
   const currentKey = fmt.monthKey();
   const paidThisMonth = useMemo(() => contributions.some(c => c.month_key===currentKey && c.status==="confirmed"), [contributions, currentKey]);
   const totalPaid = useMemo(() => contributions.filter(c => c.status==="confirmed").reduce((s,c) => s+Number(c.amount), 0), [contributions]);
+  const hasPhone = !!(member.phone);
 
   useEffect(() => {
     if (step !== "waiting") return;
@@ -257,6 +260,15 @@ function ContributionModule({ member }) {
     }, 4000);
     return () => clearInterval(iv);
   }, [step, member.id, currentKey, refetch]);
+
+  const savePhone = useCallback(async () => {
+    const cleaned = fmt.phone(phoneInput);
+    if (cleaned.length < 12) return;
+    setSavingPhone(true);
+    await supabase.from("members").update({ phone: cleaned }).eq("id", member.id);
+    setSavingPhone(false);
+    if (onPhoneAdded) onPhoneAdded(cleaned);
+  }, [phoneInput, member.id, onPhoneAdded]);
 
   const handlePay = useCallback(async () => {
     if (!isSafaricom(member.phone)) { setNotSafaricom(true); return; }
@@ -277,13 +289,17 @@ function ContributionModule({ member }) {
 
   return (
     <div className="section-stack">
-      {/* Hero status card */}
+      {/* Status hero */}
       <div className={`contrib-hero ${paidThisMonth ? "contrib-hero-paid" : "contrib-hero-due"}`}>
         <div className="contrib-hero-inner">
           <div>
             <p className="contrib-month">{fmt.monthLabel()}</p>
-            <h2 className="contrib-heading">{paidThisMonth ? "You're covered." : "Contribution due."}</h2>
-            <p className="contrib-sub">{paidThisMonth ? `${fmt.currency(totalPaid)} total contributed.` : `${fmt.currency(CONFIG.group.monthlyFee)} keeps your account active.`}</p>
+            <h2 className="contrib-heading">{paidThisMonth ? "You're covered." : "Monthly contribution."}</h2>
+            <p className="contrib-sub">
+              {paidThisMonth
+                ? `${fmt.currency(totalPaid)} total contributed.`
+                : `Contribute ${fmt.currency(CONFIG.group.monthlyFee)} to stay active this month.`}
+            </p>
           </div>
           <ActivePill active={paidThisMonth} />
         </div>
@@ -297,7 +313,20 @@ function ContributionModule({ member }) {
 
       {contributions.length > 0 && <ContributionStreak contributions={contributions} />}
 
-      {!paidThisMonth && step === "idle" && (
+      {/* No phone — ask them to add one */}
+      {!hasPhone && !paidThisMonth && (
+        <NeuCard>
+          <p className="waiting-title" style={{marginBottom:"0.25rem"}}>Add your M-Pesa number</p>
+          <p className="waiting-sub" style={{marginBottom:"1rem"}}>Required to contribute via M-Pesa.</p>
+          <div style={{display:"flex",gap:"0.6rem"}}>
+            <input className="neu-input" type="tel" placeholder="07XX XXX XXX" value={phoneInput} onChange={e => setPhoneInput(e.target.value)} style={{flex:1}} />
+            <NeuBtn loading={savingPhone} onClick={savePhone}>Save</NeuBtn>
+          </div>
+        </NeuCard>
+      )}
+
+      {/* Pay block — only if they have a phone and haven't paid */}
+      {hasPhone && !paidThisMonth && step === "idle" && (
         <NeuCard>
           {notSafaricom && (
             <div className="inline-notice inline-warn" style={{marginBottom:"1rem"}}>
@@ -305,7 +334,7 @@ function ContributionModule({ member }) {
             </div>
           )}
           <NeuBtn full loading={paying} onClick={handlePay}>
-            Pay {fmt.currency(CONFIG.group.monthlyFee)} · M-Pesa
+            Contribute {fmt.currency(CONFIG.group.monthlyFee)} · M-Pesa
           </NeuBtn>
           <p className="pay-hint">Prompt sent to <strong>{member.phone}</strong>. Enter your PIN.</p>
         </NeuCard>
@@ -533,8 +562,12 @@ function DirectoryModule() {
 
 // ─── Landing Page ─────────────────────────────────────────────────────────────
 function LandingPage() {
+  const [mode, setMode] = useState("choice"); // choice | email | code | reset | reset-sent
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resent, setResent] = useState(false);
 
   const handleGoogle = useCallback(async () => {
     setLoading(true); setError("");
@@ -545,26 +578,168 @@ function LandingPage() {
     if (error) { setError("Could not connect to Google. Try again."); setLoading(false); }
   }, []);
 
+  const handleSendCode = useCallback(async (isResend = false) => {
+    if (!email.trim() || !email.includes("@")) { setError("Enter a valid email address."); return; }
+    setLoading(true); setError(""); setResent(false);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { shouldCreateUser: true },
+    });
+    if (error) { setError("Couldn't send code. Try again."); setLoading(false); return; }
+    setLoading(false);
+    if (isResend) { setResent(true); setTimeout(() => setResent(false), 3000); }
+    else setMode("code");
+  }, [email]);
+
+  const handleVerifyCode = useCallback(async () => {
+    const cleaned = code.trim().replace(/\D/g, "");
+    if (cleaned.length < 6) { setError("Enter the 6-digit code."); return; }
+    setLoading(true); setError("");
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: cleaned,
+      type: "email",
+    });
+    if (error) { setError("Invalid or expired code. Try again."); setLoading(false); return; }
+    // onAuthStateChange fires — App handles routing automatically
+    // New users go to RegisterPage, existing users go to dashboard
+  }, [email, code]);
+
+  const handleResetRequest = useCallback(async () => {
+    if (!email.trim() || !email.includes("@")) { setError("Enter a valid email address."); return; }
+    setLoading(true); setError("");
+    // Check if email exists in members table first
+    const { data: member } = await supabase.from("members").select("id").eq("email", email.trim()).single();
+    if (!member) {
+      setError("No account found with that email address.");
+      setLoading(false); return;
+    }
+    // Send OTP — they use it to sign back in (passwordless = no separate reset needed)
+    const { error } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false } });
+    if (error) { setError("Couldn't send code. Try again."); setLoading(false); return; }
+    setLoading(false); setMode("reset-sent");
+  }, [email]);
+
+  const GoogleIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{flexShrink:0}}>
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+    </svg>
+  );
+
+  const EmailIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}>
+      <rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2,4 12,13 22,4"/>
+    </svg>
+  );
+
   return (
     <div className="splash-page">
       <div className="splash-center">
-        <div className="splash-brand">
-          <p className="splash-eyebrow">Student Welfare</p>
-          <h1 className="splash-title">{CONFIG.group.name}</h1>
-          <p className="splash-tagline">{CONFIG.group.tagline}</p>
-        </div>
+        {mode === "choice" && (
+          <div className="splash-brand">
+            <p className="splash-eyebrow">Student Welfare</p>
+            <h1 className="splash-title">{CONFIG.group.name}</h1>
+            <p className="splash-tagline">{CONFIG.group.tagline}</p>
+          </div>
+        )}
+
         <NeuCard className="auth-panel">
-          {error && <p className="neu-error" style={{textAlign:"center",marginBottom:"0.5rem"}}>{error}</p>}
-          <NeuBtn full loading={loading} onClick={handleGoogle} variant="google">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{flexShrink:0}}>
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg>
-            Continue with Google
-          </NeuBtn>
-          <p className="auth-hint">Use your university Google account.</p>
+          {error && <p className="neu-error" style={{textAlign:"center"}}>{error}</p>}
+
+          {/* ── Choice ── */}
+          {mode === "choice" && (
+            <>
+              <NeuBtn full variant="google" onClick={handleGoogle} loading={loading}>
+                <GoogleIcon /> Continue with Google
+              </NeuBtn>
+              <div className="auth-divider"><span>or</span></div>
+              <NeuBtn full variant="ghost" onClick={() => { setMode("email"); setError(""); }}>
+                <EmailIcon /> Continue with Email
+              </NeuBtn>
+              <p className="auth-hint">Sign in or create an account — free, no password.</p>
+            </>
+          )}
+
+          {/* ── Email entry ── */}
+          {mode === "email" && (
+            <>
+              <p className="auth-step-label">Enter your email</p>
+              <p className="auth-step-sub">We'll send a 6-digit code. No password needed.</p>
+              <NeuInput
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={e => { setEmail(e.target.value); setError(""); }}
+                onKeyDown={e => e.key === "Enter" && handleSendCode()}
+                autoFocus
+              />
+              <NeuBtn full loading={loading} onClick={() => handleSendCode(false)}>Send code</NeuBtn>
+              <div className="auth-row-links">
+                <button className="text-link" onClick={() => { setMode("choice"); setError(""); }}>← Back</button>
+                <button className="text-link" onClick={() => { setMode("reset"); setError(""); }}>Forgot access?</button>
+              </div>
+            </>
+          )}
+
+          {/* ── OTP entry ── */}
+          {mode === "code" && (
+            <>
+              <p className="auth-step-label">Check your inbox</p>
+              <p className="auth-step-sub">6-digit code sent to <strong style={{color:"var(--fg)"}}>{email}</strong>. Expires in 10 min.</p>
+              <NeuInput
+                type="tel"
+                inputMode="numeric"
+                placeholder="· · · · · ·"
+                maxLength={6}
+                value={code}
+                onChange={e => { setCode(e.target.value.replace(/\D/g,"")); setError(""); }}
+                onKeyDown={e => e.key === "Enter" && handleVerifyCode()}
+                autoFocus
+                style={{letterSpacing:"0.25em", fontWeight:700, fontSize:"1.2rem", textAlign:"center"}}
+              />
+              <NeuBtn full loading={loading} onClick={handleVerifyCode}>Verify &amp; sign in</NeuBtn>
+              <div className="auth-row-links">
+                <button className="text-link" onClick={() => handleSendCode(true)}>
+                  {resent ? "✓ Resent" : "Resend code"}
+                </button>
+                <button className="text-link" onClick={() => { setMode("email"); setCode(""); setError(""); }}>Change email</button>
+              </div>
+            </>
+          )}
+
+          {/* ── Reset / recover access ── */}
+          {mode === "reset" && (
+            <>
+              <p className="auth-step-label">Recover access</p>
+              <p className="auth-step-sub">Enter the email linked to your account. We'll send a sign-in code if it exists.</p>
+              <NeuInput
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={e => { setEmail(e.target.value); setError(""); }}
+                onKeyDown={e => e.key === "Enter" && handleResetRequest()}
+                autoFocus
+              />
+              <NeuBtn full loading={loading} onClick={handleResetRequest}>Send sign-in code</NeuBtn>
+              <button className="text-link" style={{textAlign:"center"}} onClick={() => { setMode("choice"); setError(""); }}>← Back to sign in</button>
+            </>
+          )}
+
+          {/* ── Reset sent ── */}
+          {mode === "reset-sent" && (
+            <>
+              <div className="auth-sent-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+              </div>
+              <p className="auth-step-label" style={{textAlign:"center"}}>Code sent.</p>
+              <p className="auth-step-sub" style={{textAlign:"center"}}>Check <strong style={{color:"var(--fg)"}}>{email}</strong> for a 6-digit code to sign back in.</p>
+              <NeuBtn full onClick={() => { setMode("code"); setError(""); }}>Enter code</NeuBtn>
+              <button className="text-link" style={{textAlign:"center"}} onClick={() => { setMode("choice"); setEmail(""); setError(""); }}>← Back</button>
+            </>
+          )}
         </NeuCard>
       </div>
     </div>
@@ -572,94 +747,67 @@ function LandingPage() {
 }
 
 // ─── Register Page ────────────────────────────────────────────────────────────
+// Shown when a signed-in user has no member record yet.
+// Just collect their name and phone — no payment gate.
 function RegisterPage({ session }) {
-  const [phone, setPhone] = useState("");
-  const [step, setStep] = useState("form");
+  const [form, setForm] = useState({ full_name: "", phone: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [pollCount, setPollCount] = useState(0);
 
-  const googleName  = session?.user?.user_metadata?.full_name ?? "";
-  const googleEmail = session?.user?.email ?? "";
+  const emailName  = session?.user?.user_metadata?.full_name ?? "";
+  const userEmail  = session?.user?.email ?? "";
+  const userAvatar = session?.user?.user_metadata?.avatar_url ?? "";
 
+  // Pre-fill name from Google if available
   useEffect(() => {
-    if (step !== "paying") return;
-    const iv = setInterval(async () => {
-      const { data } = await supabase.from("members").select("paid").eq("email",googleEmail).single();
-      if (data?.paid) { clearInterval(iv); setStep("done"); }
-      setPollCount(n => n+1);
-    }, 4000);
-    return () => clearInterval(iv);
-  }, [step, googleEmail]);
+    if (emailName && !form.full_name) setForm(f => ({...f, full_name: emailName}));
+  }, [emailName]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleRegister = useCallback(async () => {
-    const cleaned = fmt.phone(phone);
-    if (cleaned.length < 12) { setError("Enter a valid Safaricom number."); return; }
+  const handleJoin = useCallback(async () => {
+    if (!form.full_name.trim()) { setError("Please enter your name."); return; }
     setLoading(true); setError("");
-    const { data: existing } = await supabase.from("members").select("id,paid").eq("email",googleEmail).single();
-    if (existing?.paid) { navigate("/dashboard"); return; }
-    if (!existing) {
-      const { error: err } = await supabase.from("members").insert({ full_name: googleName, email: googleEmail, phone: cleaned, paid: false });
-      if (err) { setError("Could not save. Try again."); setLoading(false); return; }
-    }
-    try { await supabase.functions.invoke("mpesa-stk-push", { body: { phone: cleaned, amount: CONFIG.group.membershipFee } }); }
-    catch (e) { console.error(e); }
-    setStep("paying"); setLoading(false);
-  }, [phone, googleName, googleEmail]);
-
-  const confirmManually = useCallback(async () => {
-    setLoading(true);
-    await supabase.from("members").update({ paid: true }).eq("email", googleEmail);
-    setStep("done"); setLoading(false);
-  }, [googleEmail]);
-
-  if (step === "done") return (
-    <div className="splash-page">
-      <div className="splash-center" style={{textAlign:"center"}}>
-        <h1 className="splash-title" style={{fontSize:"clamp(2rem,8vw,3.5rem)"}}>Welcome.</h1>
-        <p className="splash-tagline">You're part of something real now.</p>
-        <NeuBtn onClick={() => navigate("/dashboard")}>Go to dashboard</NeuBtn>
-      </div>
-    </div>
-  );
-
-  if (step === "paying") return (
-    <div className="splash-page">
-      <div className="splash-center" style={{textAlign:"center"}}>
-        <h2 className="splash-title" style={{fontSize:"clamp(1.8rem,6vw,3rem)"}}>Check your phone.</h2>
-        <p className="splash-tagline" style={{marginBottom:"1.5rem"}}>
-          Pay {fmt.currency(CONFIG.group.membershipFee)} sent to <strong>{phone}</strong>.
-        </p>
-        <div className="waiting-row" style={{justifyContent:"center",marginBottom:"1.5rem"}}>
-          <span className="pulse-dot" /><span className="waiting-sub">Waiting for payment…</span>
-        </div>
-        {pollCount > 6 && (
-          <>
-            <NeuBtn full loading={loading} onClick={confirmManually}>I've paid — confirm</NeuBtn>
-            <button className="text-link" style={{marginTop:"1rem"}} onClick={() => setStep("form")}>Go back</button>
-          </>
-        )}
-      </div>
-    </div>
-  );
+    const { error: err } = await supabase.from("members").insert({
+      full_name: form.full_name.trim(),
+      email: userEmail,
+      phone: form.phone.trim() ? fmt.phone(form.phone) : null,
+      paid: false,
+    });
+    if (err) { setError("Could not save. Try again."); setLoading(false); return; }
+    window.location.href = window.location.pathname; // full reload — triggers member lookup
+  }, [form, userEmail]);
 
   return (
     <div className="splash-page">
       <div className="splash-center">
-        <h1 className="splash-title" style={{fontSize:"clamp(1.8rem,6vw,3rem)"}}>Join the group.</h1>
-        <p className="splash-tagline">{fmt.currency(CONFIG.group.membershipFee)} once. That's it.</p>
+        <div className="splash-brand" style={{marginBottom:"1.5rem"}}>
+          <h1 className="splash-title" style={{fontSize:"clamp(1.8rem,6vw,2.8rem)"}}>Almost there.</h1>
+          <p className="splash-tagline">Tell us a bit about yourself.</p>
+        </div>
         <NeuCard className="auth-panel">
-          <div className="google-identity">
-            <img src={session?.user?.user_metadata?.avatar_url} alt="" className="google-avatar" onError={e => e.target.style.display="none"} />
-            <div>
-              <p className="google-name">{googleName}</p>
-              <p className="google-email">{googleEmail}</p>
+          {userAvatar && (
+            <div style={{display:"flex",justifyContent:"center",marginBottom:"0.25rem"}}>
+              <img src={userAvatar} alt="" style={{width:52,height:52,borderRadius:"50%",boxShadow:"var(--neu-out-sm)"}} onError={e=>e.target.style.display="none"} />
             </div>
-          </div>
-          <NeuInput label="M-Pesa phone number" type="tel" placeholder="07XX XXX XXX" value={phone} onChange={e => setPhone(e.target.value)} error={error} />
-          <NeuBtn full loading={loading} onClick={handleRegister}>
-            Pay {fmt.currency(CONFIG.group.membershipFee)} &amp; join
-          </NeuBtn>
+          )}
+          <p style={{textAlign:"center",fontSize:"0.78rem",color:"var(--muted)"}}>{userEmail}</p>
+          {error && <p className="neu-error" style={{textAlign:"center"}}>{error}</p>}
+          <NeuInput
+            label="Full name"
+            placeholder="As it appears on your ID"
+            value={form.full_name}
+            onChange={e => { setForm(f=>({...f,full_name:e.target.value})); setError(""); }}
+          />
+          <NeuInput
+            label="Phone number (optional)"
+            type="tel"
+            placeholder="07XX XXX XXX"
+            value={form.phone}
+            onChange={e => setForm(f=>({...f,phone:e.target.value}))}
+          />
+          <NeuBtn full loading={loading} onClick={handleJoin}>Join the group</NeuBtn>
+          <button className="text-link" style={{textAlign:"center"}} onClick={async () => { await supabase.auth.signOut(); }}>
+            Sign out
+          </button>
         </NeuCard>
       </div>
     </div>
@@ -723,7 +871,7 @@ function DashboardPage({ member, onLogout }) {
       </nav>
 
       <div className="tab-body">
-        {tab==="contribute" && <ContributionModule member={member} />}
+        {tab==="contribute" && <ContributionModule member={member} onPhoneAdded={(phone) => { member.phone = phone; }} />}
         {tab==="loans" && (
           <div className="section-stack">
             {loansLoading ? <Spinner /> : loans.length===0 ? (
@@ -892,7 +1040,7 @@ export default function App() {
 
   const page = (() => {
     if (!session) return <LandingPage />;
-    if (!member || !member.paid) return <RegisterPage session={session} />;
+    if (!member) return <RegisterPage session={session} />;
     if (route === "/admin") {
       if (!isTreasurer) { navigate("/dashboard"); return null; }
       return <AdminPage />;
@@ -1118,6 +1266,12 @@ const CSS = `
   .splash-tagline { font-size: 0.95rem; font-weight: 300; color: var(--muted); letter-spacing: 0.01em; }
   .auth-panel { display: flex; flex-direction: column; gap: 1.1rem; padding: 2rem; }
   .auth-hint { font-size: 0.76rem; color: var(--muted); text-align: center; }
+  .auth-divider { display: flex; align-items: center; gap: 0.75rem; color: var(--muted); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; margin: 0.1rem 0; }
+  .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--surface2); box-shadow: inset 0 1px 0 rgba(255,255,255,0.6); }
+  .auth-step-label { font-family: var(--font-head); font-size: 1.05rem; font-weight: 700; margin-bottom: 0.2rem; }
+  .auth-step-sub { font-size: 0.78rem; color: var(--muted); line-height: 1.45; margin-bottom: 0.25rem; }
+  .auth-row-links { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .auth-sent-icon { width: 48px; height: 48px; border-radius: 50%; background: var(--bg); box-shadow: var(--neu-out-sm); display: flex; align-items: center; justify-content: center; color: var(--accent); margin: 0 auto 0.5rem; }
 
   .google-identity { display: flex; align-items: center; gap: 0.85rem; padding: 0.9rem 1rem; border-radius: var(--r-xs); box-shadow: var(--neu-in-sm); }
   .google-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
