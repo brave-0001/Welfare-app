@@ -520,46 +520,6 @@ function ExecutivesModule() {
   );
 }
 
-// ─── Directory ────────────────────────────────────────────────────────────────
-function DirectoryModule() {
-  const { members, loading } = useMembers();
-  const [q, setQ] = useState("");
-  const filtered = useMemo(() => {
-    const s = q.toLowerCase().trim();
-    if (!s) return members;
-    return members.filter(m => m.full_name.toLowerCase().includes(s) || m.phone.includes(s));
-  }, [members, q]);
-  const activeCount = useMemo(() => members.filter(m => m.paid).length, [members]);
-  if (loading) return <Spinner />;
-  return (
-    <div className="section-stack">
-      <div className="dir-top">
-        <div>
-          <p className="section-label" style={{marginBottom:"0.15rem"}}>Members</p>
-          <p className="dir-count">{activeCount} of {members.length} active</p>
-        </div>
-        <input className="neu-input dir-search" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
-      </div>
-      {filtered.length === 0 ? <p className="empty-msg">No members found.</p> : (
-        <div className="neu-list">
-          {filtered.map(m => (
-            <div key={m.id} className="neu-list-row">
-              <div style={{display:"flex",alignItems:"center",gap:"0.8rem",flex:1,minWidth:0}}>
-                <div className="dir-avatar">{fmt.initials(m.full_name)}</div>
-                <div className="row-info">
-                  <span className="row-title">{m.full_name}</span>
-                  <span className="row-meta">{m.phone}</span>
-                </div>
-              </div>
-              <ActivePill active={m.paid} />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Landing Page ─────────────────────────────────────────────────────────────
 function LandingPage() {
   const [mode, setMode] = useState("choice"); // choice | email | code | reset | reset-sent
@@ -770,11 +730,12 @@ function RegisterPage({ session }) {
       full_name: form.full_name.trim(),
       email: userEmail,
       phone: form.phone.trim() ? fmt.phone(form.phone) : null,
+      avatar_url: session?.user?.user_metadata?.avatar_url ?? null,
       paid: false,
     });
     if (err) { setError("Could not save. Try again."); setLoading(false); return; }
     window.location.href = window.location.pathname; // full reload — triggers member lookup
-  }, [form, userEmail]);
+  }, [form, userEmail, session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="splash-page">
@@ -991,13 +952,28 @@ function GroupChat({ member, isTreasurer }) {
   );
 }
 
-// ─── Help Desk ────────────────────────────────────────────────────────────────
+// ─── Help Desk (AI FAQ bot + admin escalation) ───────────────────────────────
+const FAQS = [
+  { q: "How do I contribute?", a: "Go to the Contribute tab and tap 'Contribute KSh 200 · M-Pesa'. A prompt will be sent to your Safaricom number. Enter your PIN to confirm." },
+  { q: "How do I request a loan?", a: "Your account must be active (monthly contribution paid). Go to the Request tab, fill in your details and submit. The treasurer will review within 24 hours." },
+  { q: "What is the joining fee?", a: "The one-time joining fee is KSh 50, paid via M-Pesa when you first join." },
+  { q: "How much is the monthly contribution?", a: "KSh 200 per month, paid via M-Pesa STK push." },
+  { q: "How long until my loan is approved?", a: "Loan requests are reviewed by the treasurer within 24 hours. You'll see the status update in the Loans tab." },
+  { q: "My payment isn't showing. What do I do?", a: "Wait a few minutes and refresh. If it still doesn't reflect after 10 minutes, contact the admin using this help desk." },
+  { q: "What is the Paybill number?", a: `Paybill: ${CONFIG.mpesa.paybill}, Account: ${CONFIG.mpesa.account}` },
+  { q: "Who are the executives?", a: "Check the About tab for the full executive team — Chairperson, Vice Chairperson, Secretary, and Treasurer." },
+  { q: "How do I join the WhatsApp group?", a: "Tap the 'Join WhatsApp' button in the About tab to join the community group." },
+  { q: "I can't sign in. What do I do?", a: "Use 'Forgot access?' on the sign-in screen. Enter your registered email and we'll send a code. If you still can't get in, ask the admin here." },
+];
+
 function HelpDesk({ member, isTreasurer }) {
-  const [threads, setThreads] = useState({}); // memberId → {name, msgs[]}
+  const [threads, setThreads] = useState({});
   const [activeThread, setActiveThread] = useState(null);
   const [myMessages, setMyMessages] = useState([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [botTyping, setBotTyping] = useState(false);
+  const [showFAQs, setShowFAQs] = useState(true);
   const bottomRef = useRef(null);
 
   const fetchAll = useCallback(async () => {
@@ -1005,7 +981,7 @@ function HelpDesk({ member, isTreasurer }) {
       const { data } = await supabase.from("help_messages").select("*, members(full_name)").order("created_at", { ascending: true }).limit(500);
       const map = {};
       (data ?? []).forEach(m => {
-        const key = m.member_id;
+        const key = m.is_admin_reply ? m.member_id : m.member_id;
         if (!map[key]) map[key] = { name: m.members?.full_name ?? "Member", msgs: [], lastAt: m.created_at };
         map[key].msgs.push(m);
         map[key].lastAt = m.created_at;
@@ -1015,6 +991,7 @@ function HelpDesk({ member, isTreasurer }) {
     } else {
       const { data } = await supabase.from("help_messages").select("*").eq("member_id", member.id).order("created_at", { ascending: true });
       setMyMessages(data ?? []);
+      if (data && data.length > 0) setShowFAQs(false);
     }
   }, [member.id, isTreasurer, activeThread]);
 
@@ -1029,92 +1006,159 @@ function HelpDesk({ member, isTreasurer }) {
 
   useEffect(() => {
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-  }, [myMessages, activeThread, threads]);
+  }, [myMessages, activeThread, threads, botTyping]);
+
+  // Find best FAQ match using simple keyword scoring
+  const findFAQMatch = useCallback((query) => {
+    const q = query.toLowerCase();
+    let best = null; let bestScore = 0;
+    FAQS.forEach(faq => {
+      const keywords = faq.q.toLowerCase().split(/\s+/);
+      const score = keywords.filter(k => k.length > 3 && q.includes(k)).length;
+      if (score > bestScore) { best = faq; bestScore = score; }
+    });
+    return bestScore >= 1 ? best : null;
+  }, []);
 
   const send = useCallback(async () => {
     const content = text.trim();
     if (!content) return;
-    setSending(true);
-    setText("");
-    const targetMember = isTreasurer ? activeThread : member.id;
-    const { error } = await supabase.from("help_messages").insert({ member_id: targetMember, content, is_admin_reply: isTreasurer });
-    if (error) {
-      setText(content);
-      console.error("Send failed:", error);
-    }
-    setSending(false);
-    fetchAll();
-  }, [text, member.id, isTreasurer, activeThread, fetchAll]);
+    setSending(true); setText(""); setShowFAQs(false);
 
-  // Member view — simple chat with admin
-  if (!isTreasurer) {
+    if (isTreasurer) {
+      await supabase.from("help_messages").insert({ member_id: activeThread, content, is_admin_reply: true });
+      setSending(false); return;
+    }
+
+    // Save member message
+    await supabase.from("help_messages").insert({ member_id: member.id, content, is_admin_reply: false });
+    setSending(false);
+
+    // Try FAQ match first
+    const match = findFAQMatch(content);
+    if (match) {
+      setBotTyping(true);
+      await new Promise(r => setTimeout(r, 900)); // natural typing delay
+      await supabase.from("help_messages").insert({
+        member_id: member.id,
+        content: match.a,
+        is_admin_reply: true,
+        is_bot: true,
+      });
+      setBotTyping(false);
+    } else {
+      // No match — bot tells them admin will respond
+      setBotTyping(true);
+      await new Promise(r => setTimeout(r, 1200));
+      await supabase.from("help_messages").insert({
+        member_id: member.id,
+        content: "Thanks for reaching out. Your message has been sent to the admin and you'll get a response within 24 hours. 🙏",
+        is_admin_reply: true,
+        is_bot: true,
+      });
+      setBotTyping(false);
+    }
+  }, [text, member.id, isTreasurer, activeThread, findFAQMatch]);
+
+  const tapFAQ = useCallback(async (faq) => {
+    setShowFAQs(false);
+    await supabase.from("help_messages").insert({ member_id: member.id, content: faq.q, is_admin_reply: false });
+    setBotTyping(true);
+    await new Promise(r => setTimeout(r, 700));
+    await supabase.from("help_messages").insert({ member_id: member.id, content: faq.a, is_admin_reply: true, is_bot: true });
+    setBotTyping(false);
+  }, [member.id]);
+
+  // ── Admin view ──
+  if (isTreasurer) {
+    const threadList = Object.entries(threads).sort((a,b) => new Date(b[1].lastAt) - new Date(a[1].lastAt));
+    const activeMessages = activeThread ? (threads[activeThread]?.msgs ?? []) : [];
     return (
-      <div className="chat-pane">
-        <div className="chat-feed">
-          {myMessages.length === 0 && (
-            <div className="chat-empty-state">
-              <div className="chat-empty-icon">🙋</div>
-              <p>Get help</p>
-              <p className="chat-empty-sub">Send a message to the admin. We'll reply as soon as possible.</p>
-            </div>
-          )}
-          {myMessages.map(m => {
-            const isAdmin = m.is_admin_reply;
-            return (
-              <div key={m.id} className={`msg-row ${!isAdmin ? "msg-row-me" : "msg-row-them"}`}>
-                <div className="msg-group">
-                  {isAdmin && <span className="msg-sender">Admin</span>}
-                  <div className={`msg-bubble ${isAdmin ? "bubble-admin" : "bubble-me"}`}>{m.content}</div>
-                  <span className="msg-time">{fmt.date(m.created_at)}</span>
-                </div>
+      <div className="help-admin-wrap">
+        <div className="thread-list">
+          {threadList.length === 0 && <p className="empty-msg" style={{padding:"1rem"}}>No help requests yet.</p>}
+          {threadList.map(([id, { name, msgs }]) => (
+            <button key={id} className={`thread-item ${activeThread===id?"thread-item-active":""}`} onClick={() => setActiveThread(id)}>
+              <Avatar name={name} size={36} />
+              <div className="thread-item-info">
+                <span className="thread-item-name">{name}</span>
+                <span className="thread-item-preview">{msgs[msgs.length-1]?.content ?? ""}</span>
               </div>
-            );
-          })}
-          <div ref={bottomRef} />
+            </button>
+          ))}
         </div>
-        <ChatInput value={text} onChange={e => setText(e.target.value)} onSend={send} sending={sending} placeholder="Ask admin anything…" />
+        {activeThread && (
+          <div className="chat-pane" style={{marginTop:"1rem"}}>
+            <p className="section-label" style={{marginBottom:"0.5rem"}}>Replying to {threads[activeThread]?.name}</p>
+            <div className="chat-feed" style={{maxHeight:"260px"}}>
+              {activeMessages.map(m => (
+                <div key={m.id} className={`msg-row ${m.is_admin_reply?"msg-row-me":"msg-row-them"}`}>
+                  <div className="msg-group">
+                    {!m.is_admin_reply && <span className="msg-sender">{threads[activeThread]?.name}</span>}
+                    {m.is_admin_reply && <span className="msg-sender">{m.is_bot ? "🤖 Bot" : "Admin"}</span>}
+                    <div className={`msg-bubble ${m.is_admin_reply?"bubble-me":"bubble-them"}`}>{m.content}</div>
+                  </div>
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </div>
+            <ChatInput value={text} onChange={e => setText(e.target.value)} onSend={send} sending={sending} placeholder="Reply as admin…" />
+          </div>
+        )}
       </div>
     );
   }
 
-  // Admin view — thread list + active thread
-  const threadList = Object.entries(threads).sort((a, b) => new Date(b[1].lastAt) - new Date(a[1].lastAt));
-  const activeMessages = activeThread ? (threads[activeThread]?.msgs ?? []) : [];
-
+  // ── Member view ──
   return (
-    <div className="help-admin-wrap">
-      {/* Thread list */}
-      <div className="thread-list">
-        {threadList.length === 0 && <p className="empty-msg">No help requests yet.</p>}
-        {threadList.map(([id, { name, msgs }]) => (
-          <button key={id} className={`thread-item ${activeThread === id ? "thread-item-active" : ""}`} onClick={() => setActiveThread(id)}>
-            <Avatar name={name} size={36} />
-            <div className="thread-item-info">
-              <span className="thread-item-name">{name}</span>
-              <span className="thread-item-preview">{msgs[msgs.length-1]?.content ?? ""}</span>
+    <div className="chat-pane">
+      <div className="chat-feed">
+        {/* Welcome + FAQs */}
+        {showFAQs && myMessages.length === 0 && (
+          <div className="faq-wrap">
+            <div className="bc-message" style={{marginBottom:"0.5rem"}}>
+              <span className="bc-badge">🤖 Stahili Assistant</span>
+              <p className="bc-text">Hi {member.full_name?.split(" ")[0]} 👋 How can I help you today? Tap a question or type your own.</p>
             </div>
-          </button>
-        ))}
-      </div>
-
-      {/* Active thread */}
-      {activeThread && (
-        <div className="chat-pane" style={{marginTop:"1rem"}}>
-          <p className="section-label" style={{marginBottom:"0.5rem"}}>Replying to {threads[activeThread]?.name}</p>
-          <div className="chat-feed" style={{maxHeight:"280px"}}>
-            {activeMessages.map(m => (
-              <div key={m.id} className={`msg-row ${m.is_admin_reply ? "msg-row-me" : "msg-row-them"}`}>
-                <div className="msg-group">
-                  {!m.is_admin_reply && <span className="msg-sender">{threads[activeThread]?.name}</span>}
-                  <div className={`msg-bubble ${m.is_admin_reply ? "bubble-me" : "bubble-them"}`}>{m.content}</div>
-                </div>
-              </div>
-            ))}
-            <div ref={bottomRef} />
+            <div className="faq-list">
+              {FAQS.slice(0, 6).map(faq => (
+                <button key={faq.q} className="faq-chip" onClick={() => tapFAQ(faq)}>{faq.q}</button>
+              ))}
+            </div>
           </div>
-          <ChatInput value={text} onChange={e => setText(e.target.value)} onSend={send} sending={sending} placeholder="Reply…" />
-        </div>
-      )}
+        )}
+
+        {myMessages.map(m => {
+          const isAdmin = m.is_admin_reply;
+          return (
+            <div key={m.id} className={`msg-row ${!isAdmin?"msg-row-me":"msg-row-them"}`}>
+              {isAdmin && (
+                <div style={{width:28,height:28,borderRadius:"50%",background:"var(--bg)",boxShadow:"var(--neu-out-sm)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>
+                  {m.is_bot ? "🤖" : "👤"}
+                </div>
+              )}
+              <div className="msg-group">
+                {isAdmin && <span className="msg-sender">{m.is_bot ? "Assistant" : "Admin"}</span>}
+                <div className={`msg-bubble ${isAdmin?"bubble-them":"bubble-me"}`}>{m.content}</div>
+              </div>
+            </div>
+          );
+        })}
+
+        {botTyping && (
+          <div className="msg-row msg-row-them">
+            <div style={{width:28,height:28,borderRadius:"50%",background:"var(--bg)",boxShadow:"var(--neu-out-sm)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>🤖</div>
+            <div className="msg-group">
+              <span className="msg-sender">Assistant</span>
+              <div className="msg-bubble bubble-them typing-dots">
+                <span /><span /><span />
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <ChatInput value={text} onChange={e => setText(e.target.value)} onSend={send} sending={sending} placeholder="Ask anything…" />
     </div>
   );
 }
@@ -1288,8 +1332,7 @@ function DashboardPage({ member, onLogout }) {
         )}
         {tab==="request"   && <LoanModule member={member} isActive={isActive} />}
         {tab==="connect"   && <ConnectHub member={member} />}
-        {tab==="community" && <CommunityModule />}
-        {tab==="team"      && <ExecutivesModule />}
+        {tab==="about"     && <AboutTab />}
       </div>
     </div>
   );
@@ -1865,6 +1908,18 @@ const CSS = `
   .thread-item-preview { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .members-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
+
+  .faq-wrap { display: flex; flex-direction: column; gap: 0.6rem; align-items: center; padding: 0.5rem 0; }
+  .faq-list { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+  .faq-chip { background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 999px; padding: 0.45rem 1rem; font-family: var(--font-body); font-size: 0.78rem; font-weight: 500; color: var(--accent2); cursor: pointer; transition: all 0.2s; text-align: left; }
+  .faq-chip:hover { box-shadow: var(--neu-btn-hover); }
+  .faq-chip:active { box-shadow: var(--neu-in-sm); transform: scale(0.98); }
+
+  .typing-dots { display: flex; align-items: center; gap: 4px; padding: 0.65rem 1rem; }
+  .typing-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: typingBounce 1.2s ease-in-out infinite; }
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typingBounce { 0%,60%,100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-5px); opacity: 1; } }
 
   /* ── Animations ── */
   @keyframes spin  { to { transform: rotate(360deg); } }
