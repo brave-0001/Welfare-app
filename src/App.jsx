@@ -17,7 +17,7 @@ const CONFIG = {
     whatsapp: "https://chat.whatsapp.com/KPQUvYLxOtT30lTTsNbrlx?mode=hq1tcli",
     regPrefix: "COM",
   },
-  mpesa: { paybill: "625625", account: "7717127865" },
+  mpesa: { till: "3346425" },
   executives: [
     { name: "Isaac Kipngetich", title: "Chairperson",     bio: "Leads with clarity. Keeps the group moving forward.",    photo: "/chair.jpg" },
     { name: "Daisy Sakwa",      title: "Vice Chairperson", bio: "Bridges ideas and action. Always present when needed.", photo: "/vice.jpg" },
@@ -278,7 +278,7 @@ function ContributionModule({ member, onPhoneAdded }) {
       .select("id").single();
     try {
       await supabase.functions.invoke("mpesa-stk-push", {
-        body: { phone: fmt.phone(member.phone), amount: CONFIG.group.monthlyFee, paybill: CONFIG.mpesa.paybill, account: CONFIG.mpesa.account, contributionId: contrib?.id },
+        body: { phone: fmt.phone(member.phone), amount: CONFIG.group.monthlyFee, till: CONFIG.mpesa.till, contributionId: contrib?.id },
       });
       setStep("waiting");
     } catch (e) { console.error(e); setStep("waiting"); }
@@ -330,7 +330,7 @@ function ContributionModule({ member, onPhoneAdded }) {
         <NeuCard>
           {notSafaricom && (
             <div className="inline-notice inline-warn" style={{marginBottom:"1rem"}}>
-              <strong>Safaricom only.</strong> Pay manually — Paybill <strong>{CONFIG.mpesa.paybill}</strong>, Account <strong>{CONFIG.mpesa.account}</strong>.
+              <strong>Safaricom only.</strong> Pay manually — Till <strong>{CONFIG.mpesa.till}</strong>.
             </div>
           )}
           <NeuBtn full loading={paying} onClick={handlePay}>
@@ -463,59 +463,6 @@ function LoanModule({ member, isActive }) {
           <NeuBtn full loading={status==="loading"} onClick={handleSubmit}>Submit request</NeuBtn>
         </div>
       </NeuCard>
-    </div>
-  );
-}
-
-// ─── Community ────────────────────────────────────────────────────────────────
-function CommunityModule() {
-  return (
-    <div className="section-stack">
-      <NeuCard className="community-card">
-        <h2 className="community-title">{CONFIG.group.description}</h2>
-        <div className="benefit-stack">
-          {["Emergency financial support when it matters most.", "A community that moves as one.", "Student welfare, handled with dignity."].map(b => (
-            <div key={b} className="benefit-row"><span className="benefit-dot"/><span>{b}</span></div>
-          ))}
-        </div>
-      </NeuCard>
-      <div className="wa-card">
-        <div>
-          <h3 className="wa-title">Join the conversation.</h3>
-          <p className="wa-sub">Updates, support, and community — all in one place.</p>
-        </div>
-        <a href={CONFIG.group.whatsapp} target="_blank" rel="noreferrer" className="neu-btn neu-btn-accent">Join WhatsApp</a>
-      </div>
-      <NeuCard>
-        <div className="dev-row">
-          <div>
-            <p className="dev-name">{CONFIG.developer.name}</p>
-            <p className="dev-desc">{CONFIG.developer.description}</p>
-          </div>
-          <a href={CONFIG.developer.portfolio} target="_blank" rel="noreferrer" className="neu-btn neu-btn-ghost neu-btn-small">Portfolio →</a>
-        </div>
-      </NeuCard>
-    </div>
-  );
-}
-
-// ─── Executives ───────────────────────────────────────────────────────────────
-function ExecutivesModule() {
-  return (
-    <div className="section-stack">
-      <div className="exec-grid">
-        {CONFIG.executives.map(ex => (
-          <NeuCard key={ex.name} className="exec-card">
-            <div className="exec-avatar-wrap">
-              <img src={ex.photo} alt={ex.name} className="exec-avatar" onError={e => { e.target.style.display="none"; e.target.nextSibling.style.display="flex"; }} />
-              <div className="exec-initials" style={{display:"none"}}>{fmt.initials(ex.name)}</div>
-            </div>
-            <span className="exec-name">{ex.name}</span>
-            <span className="exec-role">{ex.title}</span>
-            <span className="exec-bio">{ex.bio}</span>
-          </NeuCard>
-        ))}
-      </div>
     </div>
   );
 }
@@ -775,54 +722,47 @@ function RegisterPage({ session }) {
   );
 }
 
-// ─── Connect Hub (Chat + Help + People) ──────────────────────────────────────
+// ─── Connect Hub ──────────────────────────────────────────────────────────────
 function ConnectHub({ member }) {
-  const [view, setView] = useState("group"); // group | help | people
+  const [view, setView] = useState("group");
   const isTreasurer = member.email === CONFIG.treasurer.email;
-
+  const VIEWS = [
+    ["group", "Chat"],
+    ["help", isTreasurer ? "Inbox" : "Ask"],
+    ["people", "People"],
+  ];
   return (
     <div className="connect-wrap">
-      {/* Sub nav — Apple segmented control style */}
       <div className="seg-control">
-        {[["group", "Group"], ["help", isTreasurer ? "Help Requests" : "Get Help"], ["people", "Members"]].map(([key, label]) => (
-          <button key={key} className={`seg-btn ${view === key ? "seg-active" : ""}`} onClick={() => setView(key)}>
-            {label}
-          </button>
+        {VIEWS.map(([key, label]) => (
+          <button key={key} className={`seg-btn ${view===key?"seg-active":""}`} onClick={() => setView(key)}>{label}</button>
         ))}
       </div>
-
-      {view === "group"  && <GroupChat member={member} isTreasurer={isTreasurer} />}
-      {view === "help"   && <HelpDesk member={member} isTreasurer={isTreasurer} />}
-      {view === "people" && <MembersView member={member} />}
+      {view==="group"  && <GroupChat member={member} isTreasurer={isTreasurer} />}
+      {view==="help"   && <HelpDesk member={member} isTreasurer={isTreasurer} />}
+      {view==="people" && <MembersView member={member} />}
     </div>
   );
 }
 
-// ─── Shared chat utilities ────────────────────────────────────────────────────
+// ─── Avatar ───────────────────────────────────────────────────────────────────
 function Avatar({ name, photo, size = 32 }) {
   const [err, setErr] = useState(false);
-  const initials = fmt.initials(name ?? "?");
-  if (photo && !err) {
-    return <img src={photo} alt={name} onError={() => setErr(true)} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
-  }
+  if (photo && !err) return <img src={photo} alt={name} onError={() => setErr(true)} style={{width:size,height:size,borderRadius:"50%",objectFit:"cover",flexShrink:0,boxShadow:"var(--neu-out-sm)"}} />;
   return (
-    <div style={{ width: size, height: size, borderRadius: "50%", background: "var(--bg)", boxShadow: "var(--neu-out-sm)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.35, fontWeight: 700, color: "var(--accent2)", flexShrink: 0 }}>
-      {initials}
+    <div style={{width:size,height:size,borderRadius:"50%",background:"var(--bg)",boxShadow:"var(--neu-out-sm)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.34,fontWeight:700,color:"var(--accent2)",flexShrink:0,letterSpacing:"-0.02em"}}>
+      {fmt.initials(name ?? "?")}
     </div>
   );
 }
 
-function ChatInput({ value, onChange, onSend, sending, placeholder = "Message…" }) {
+// ─── Chat Composer ────────────────────────────────────────────────────────────
+function ChatInput({ value, onChange, onSend, sending, placeholder="Message…", ref }) {
   return (
     <div className="chat-composer">
-      <input
-        className="chat-composer-input"
-        placeholder={placeholder}
-        value={value}
-        onChange={onChange}
-        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }}
-      />
-      <button className={`chat-send-btn ${value.trim() ? "chat-send-active" : ""}`} onClick={onSend} disabled={sending || !value.trim()}>
+      <input ref={ref} className="chat-composer-input" placeholder={placeholder} value={value} onChange={onChange}
+        onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }} />
+      <button className={`chat-send-btn ${value.trim()?"chat-send-active":""}`} onClick={onSend} disabled={sending||!value.trim()}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
       </button>
     </div>
@@ -837,93 +777,233 @@ function GroupChat({ member, isTreasurer }) {
   const [bcText, setBcText] = useState("");
   const [bcSending, setBcSending] = useState(false);
   const [bcSent, setBcSent] = useState(false);
+  const [menuId, setMenuId] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);   // {id, name, content}
+  const [reactions, setReactions] = useState({}); // msgId → {emoji: count}
+  const [pinned, setPinned] = useState(null);
+  const [selected, setSelected] = useState([]);
+  const [selecting, setSelecting] = useState(false);
+  const [emojiTarget, setEmojiTarget] = useState(null);
   const bottomRef = useRef(null);
+  const inputRef = useRef(null);
 
-  const fetch = useCallback(async () => {
-    const { data } = await supabase
-      .from("group_messages")
-      .select("*, members(full_name, email)")
+  const EMOJIS = ["❤️","😂","👍","🙏","😮","😢"];
+
+  const fetchMsgs = useCallback(async () => {
+    const { data } = await supabase.from("group_messages")
+      .select("*, members(full_name, avatar_url)")
+      .eq("deleted", false)
       .order("created_at", { ascending: true })
-      .limit(150);
+      .limit(200);
     setMessages(data ?? []);
+    // Load reactions
+    const { data: rxns } = await supabase.from("message_reactions").select("*");
+    const map = {};
+    (rxns ?? []).forEach(r => {
+      if (!map[r.message_id]) map[r.message_id] = {};
+      map[r.message_id][r.emoji] = (map[r.message_id][r.emoji] || 0) + 1;
+    });
+    setReactions(map);
+    // Load pinned
+    const { data: pins } = await supabase.from("group_messages").select("id,content,members(full_name)").eq("pinned", true).limit(1).single();
+    if (pins) setPinned(pins);
   }, []);
 
-  useEffect(() => { fetch(); }, [fetch]);
-
+  useEffect(() => { fetchMsgs(); }, [fetchMsgs]);
   useEffect(() => {
-    const ch = supabase.channel("grp")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "group_messages" }, () => fetch())
+    const ch = supabase.channel("grp-v3")
+      .on("postgres_changes", { event: "*", schema: "public", table: "group_messages" }, () => fetchMsgs())
+      .on("postgres_changes", { event: "*", schema: "public", table: "message_reactions" }, () => fetchMsgs())
       .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [fetch]);
-
+  }, [fetchMsgs]);
+  useEffect(() => { setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 60); }, [messages]);
   useEffect(() => {
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-  }, [messages]);
+    if (!menuId && !emojiTarget) return;
+    const close = (e) => {
+      if (!e.target.closest(".msg-menu") && !e.target.closest(".emoji-bar") && !e.target.closest(".msg-action-dot")) {
+        setMenuId(null); setEmojiTarget(null);
+      }
+    };
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [menuId, emojiTarget]);
 
   const send = useCallback(async () => {
     const content = text.trim();
     if (!content) return;
-    setSending(true);
-    setText(""); // clear immediately — optimistic UX
-    const { error } = await supabase.from("group_messages").insert({ member_id: member.id, content, is_broadcast: false });
-    if (error) {
-      setText(content); // restore on failure
-      console.error("Send failed:", error);
-    }
+    setSending(true); setText(""); setReplyTo(null);
+    const { error } = await supabase.from("group_messages").insert({
+      member_id: member.id, content, is_broadcast: false, deleted: false,
+      reply_to_id: replyTo?.id ?? null, reply_preview: replyTo?.content?.slice(0, 60) ?? null,
+      reply_sender: replyTo?.name ?? null,
+    });
+    if (error) { setText(content); }
     setSending(false);
-    fetch(); // always refetch to sync
-  }, [text, member.id, fetch]);
+    inputRef.current?.focus();
+  }, [text, member.id, replyTo]);
 
   const broadcast = useCallback(async () => {
     const content = bcText.trim();
     if (!content) return;
-    setBcSending(true);
-    setBcText("");
-    await supabase.from("group_messages").insert({ member_id: member.id, content, is_broadcast: true });
+    setBcSending(true); setBcText("");
+    await supabase.from("group_messages").insert({ member_id: member.id, content, is_broadcast: true, deleted: false });
     setBcSending(false); setBcSent(true);
     setTimeout(() => setBcSent(false), 2500);
   }, [bcText, member.id]);
 
-  // Group consecutive messages by same sender
-  const grouped = useMemo(() => {
-    return messages.map((m, i) => ({
-      ...m,
-      showAvatar: i === 0 || messages[i-1].member_id !== m.member_id,
-      showName: i === 0 || messages[i-1].member_id !== m.member_id,
-    }));
-  }, [messages]);
+  const reactTo = useCallback(async (msgId, emoji) => {
+    setEmojiTarget(null);
+    const { data: existing } = await supabase.from("message_reactions").select("id")
+      .eq("message_id", msgId).eq("member_id", member.id).eq("emoji", emoji).single();
+    if (existing) {
+      await supabase.from("message_reactions").delete().eq("id", existing.id);
+    } else {
+      await supabase.from("message_reactions").insert({ message_id: msgId, member_id: member.id, emoji });
+    }
+    fetchMsgs();
+  }, [member.id, fetchMsgs]);
+
+  const pinMsg = useCallback(async (id) => {
+    await supabase.from("group_messages").update({ pinned: false }).neq("id", "00000000-0000-0000-0000-000000000000");
+    await supabase.from("group_messages").update({ pinned: true }).eq("id", id);
+    setMenuId(null); fetchMsgs();
+  }, [fetchMsgs]);
+
+  const unpinMsg = useCallback(async () => {
+    await supabase.from("group_messages").update({ pinned: false }).eq("pinned", true);
+    setPinned(null); fetchMsgs();
+  }, [fetchMsgs]);
+
+  const copyMsg = (content) => { navigator.clipboard?.writeText(content); setMenuId(null); };
+
+  const toggleSelect = (id) => {
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const deleteSelected = async () => {
+    await Promise.all(selected.map(id => supabase.from("group_messages").update({ deleted: true }).eq("id", id).eq("member_id", member.id)));
+    setSelected([]); setSelecting(false); fetchMsgs();
+  };
+
+  const grouped = useMemo(() => messages.map((m, i) => ({
+    ...m,
+    showMeta: i===0 || messages[i-1].member_id !== m.member_id || m.is_broadcast,
+    showTime: i===messages.length-1 || messages[i+1].member_id !== m.member_id,
+  })), [messages]);
+
+  const formatTime = (ts) => new Date(ts).toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" });
 
   return (
     <div className="chat-pane">
+      {/* Pinned message */}
+      {pinned && (
+        <div className="pinned-bar">
+          <span className="pinned-icon">📌</span>
+          <div className="pinned-content">
+            <span className="pinned-label">Pinned</span>
+            <span className="pinned-text">{pinned.content}</span>
+          </div>
+          {isTreasurer && <button className="pinned-close" onClick={unpinMsg}>✕</button>}
+        </div>
+      )}
+
+      {/* Select mode bar */}
+      {selecting && (
+        <div className="select-bar">
+          <span>{selected.length} selected</span>
+          <div style={{display:"flex",gap:"0.5rem"}}>
+            <button className="neu-btn neu-btn-ghost neu-btn-small" onClick={() => { setSelecting(false); setSelected([]); }}>Cancel</button>
+            {selected.length > 0 && <button className="neu-btn neu-btn-small" style={{color:"var(--danger)"}} onClick={deleteSelected}>Delete</button>}
+          </div>
+        </div>
+      )}
+
       <div className="chat-feed">
-        {grouped.length === 0 && (
+        {grouped.length===0 && (
           <div className="chat-empty-state">
             <div className="chat-empty-icon">💬</div>
             <p>Group chat</p>
-            <p className="chat-empty-sub">Say hello to everyone.</p>
+            <p className="chat-empty-sub">Be the first to say hello.</p>
           </div>
         )}
         {grouped.map(m => {
           const isMe = m.member_id === member.id;
-          const isBc = m.is_broadcast;
-          if (isBc) return (
-            <div key={m.id} className="bc-message">
-              <span className="bc-badge">📢 Announcement</span>
-              <p className="bc-text">{m.content}</p>
-              <span className="msg-time">{fmt.date(m.created_at)}</span>
+          const msgReactions = reactions[m.id] ?? {};
+          const isSelected = selected.includes(m.id);
+
+          if (m.is_broadcast) return (
+            <div key={m.id} className="bc-pill">
+              <span className="bc-pip">📢</span>
+              <span>{m.content}</span>
             </div>
           );
+
           return (
-            <div key={m.id} className={`msg-row ${isMe ? "msg-row-me" : "msg-row-them"}`}>
-              {!isMe && m.showAvatar && (
-                <Avatar name={m.members?.full_name ?? "?"} size={28} />
+            <div key={m.id}
+              className={`msg-wrap ${isMe?"msg-wrap-me":""} ${isSelected?"msg-selected":""}`}
+              onClick={() => selecting && toggleSelect(m.id)}
+              onLongPress={() => { setSelecting(true); toggleSelect(m.id); }}
+            >
+              {selecting && (
+                <div className={`select-circle ${isSelected?"select-circle-on":""}`} />
               )}
-              {!isMe && !m.showAvatar && <div style={{width:28,flexShrink:0}} />}
-              <div className="msg-group">
-                {!isMe && m.showName && <span className="msg-sender">{m.members?.full_name ?? "Member"}</span>}
-                <div className={`msg-bubble ${isMe ? "bubble-me" : "bubble-them"}`}>{m.content}</div>
-                {m.showAvatar && <span className="msg-time">{fmt.date(m.created_at)}</span>}
+              {!isMe && m.showMeta && <Avatar name={m.members?.full_name} photo={m.members?.avatar_url} size={26} />}
+              {!isMe && !m.showMeta && <div style={{width:26,flexShrink:0}} />}
+
+              <div className="msg-col">
+                {m.showMeta && !isMe && <span className="msg-name">{m.members?.full_name ?? "Member"}</span>}
+
+                <div className="msg-line">
+                  {/* Context menu trigger — appears on hover */}
+                  <div className="msg-actions" onClick={e => { e.stopPropagation(); setMenuId(menuId===m.id?null:m.id); setEmojiTarget(null); }}>
+                    <span className="msg-action-dot">•••</span>
+                    {menuId===m.id && (
+                      <div className={`msg-menu ${isMe?"msg-menu-right":""}`}>
+                        <button className="msg-menu-item" onClick={() => { setReplyTo({id:m.id, name: m.members?.full_name ?? "them", content: m.content}); setMenuId(null); inputRef.current?.focus(); }}>↩ Reply</button>
+                        <button className="msg-menu-item" onClick={() => copyMsg(m.content)}>Copy</button>
+                        <button className="msg-menu-item" onClick={() => { setEmojiTarget(emojiTarget===m.id?null:m.id); setMenuId(null); }}>React</button>
+                        {isTreasurer && <button className="msg-menu-item" onClick={() => pinMsg(m.id)}>📌 Pin</button>}
+                        {!selecting && <button className="msg-menu-item" onClick={() => { setSelecting(true); toggleSelect(m.id); setMenuId(null); }}>Select</button>}
+                        {isMe && <button className="msg-menu-item msg-menu-danger" onClick={() => { setMessages(prev=>prev.filter(x=>x.id!==m.id)); setMenuId(null); }}>Delete for me</button>}
+                        {isMe && <button className="msg-menu-item msg-menu-danger" onClick={async()=>{await supabase.from("group_messages").update({deleted:true,content:""}).eq("id",m.id);setMenuId(null);}}>Delete for everyone</button>}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="msg-bubble-wrap">
+                    {/* Reply preview */}
+                    {m.reply_preview && (
+                      <div className={`reply-preview ${isMe?"reply-me":""}`}>
+                        <span className="reply-sender">{m.reply_sender}</span>
+                        <span className="reply-text">{m.reply_preview}</span>
+                      </div>
+                    )}
+                    <div className={`msg-bubble ${isMe?"bubble-me":"bubble-them"}`}>{m.content}</div>
+                  </div>
+                </div>
+
+                {/* Emoji picker */}
+                {emojiTarget===m.id && (
+                  <div className={`emoji-bar ${isMe?"emoji-bar-me":""}`} onClick={e=>e.stopPropagation()}>
+                    {EMOJIS.map(emoji => (
+                      <button key={emoji} className="emoji-btn" onClick={() => reactTo(m.id, emoji)}>{emoji}</button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Reaction pills */}
+                {Object.keys(msgReactions).length > 0 && (
+                  <div className={`reaction-row ${isMe?"reaction-row-me":""}`}>
+                    {Object.entries(msgReactions).map(([emoji, count]) => (
+                      <button key={emoji} className="reaction-pill" onClick={() => reactTo(m.id, emoji)}>
+                        {emoji} {count > 1 && <span>{count}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {m.showTime && <span className="msg-time">{formatTime(m.created_at)}</span>}
               </div>
             </div>
           );
@@ -931,40 +1011,51 @@ function GroupChat({ member, isTreasurer }) {
         <div ref={bottomRef} />
       </div>
 
+      {/* Reply preview bar */}
+      {replyTo && (
+        <div className="reply-bar">
+          <div className="reply-bar-content">
+            <span className="reply-bar-sender">Replying to {replyTo.name}</span>
+            <span className="reply-bar-text">{replyTo.content.slice(0, 80)}</span>
+          </div>
+          <button className="reply-bar-close" onClick={() => setReplyTo(null)}>✕</button>
+        </div>
+      )}
+
       {isTreasurer && (
         <div className="bc-composer">
-          <span className="bc-composer-label">📢</span>
-          <input
-            className="chat-composer-input"
-            placeholder="Broadcast to all members…"
-            value={bcText}
-            onChange={e => setBcText(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && broadcast()}
-          />
-          <button className={`chat-send-btn ${bcText.trim() ? "chat-send-active" : ""}`} onClick={broadcast} disabled={bcSending || !bcText.trim()}>
+          <span style={{fontSize:"14px",flexShrink:0}}>📢</span>
+          <input className="chat-composer-input" placeholder="Broadcast to everyone…" value={bcText} onChange={e=>setBcText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&broadcast()} />
+          <button className={`chat-send-btn ${bcText.trim()?"chat-send-active":""}`} onClick={broadcast} disabled={bcSending||!bcText.trim()}>
             {bcSent ? "✓" : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>}
           </button>
         </div>
       )}
 
-      <ChatInput value={text} onChange={e => setText(e.target.value)} onSend={send} sending={sending} />
+      <ChatInput ref={inputRef} value={text} onChange={e=>setText(e.target.value)} onSend={send} sending={sending} />
     </div>
   );
 }
 
-// ─── Help Desk (AI FAQ bot + admin escalation) ───────────────────────────────
-const FAQS = [
-  { q: "How do I contribute?", a: "Go to the Contribute tab and tap 'Contribute KSh 200 · M-Pesa'. A prompt will be sent to your Safaricom number. Enter your PIN to confirm." },
-  { q: "How do I request a loan?", a: "Your account must be active (monthly contribution paid). Go to the Request tab, fill in your details and submit. The treasurer will review within 24 hours." },
-  { q: "What is the joining fee?", a: "The one-time joining fee is KSh 50, paid via M-Pesa when you first join." },
-  { q: "How much is the monthly contribution?", a: "KSh 200 per month, paid via M-Pesa STK push." },
-  { q: "How long until my loan is approved?", a: "Loan requests are reviewed by the treasurer within 24 hours. You'll see the status update in the Loans tab." },
-  { q: "My payment isn't showing. What do I do?", a: "Wait a few minutes and refresh. If it still doesn't reflect after 10 minutes, contact the admin using this help desk." },
-  { q: "What is the Paybill number?", a: `Paybill: ${CONFIG.mpesa.paybill}, Account: ${CONFIG.mpesa.account}` },
-  { q: "Who are the executives?", a: "Check the About tab for the full executive team — Chairperson, Vice Chairperson, Secretary, and Treasurer." },
-  { q: "How do I join the WhatsApp group?", a: "Tap the 'Join WhatsApp' button in the About tab to join the community group." },
-  { q: "I can't sign in. What do I do?", a: "Use 'Forgot access?' on the sign-in screen. Enter your registered email and we'll send a code. If you still can't get in, ask the admin here." },
-];
+// ─── Help Desk + AI Assistant ─────────────────────────────────────────────────
+const SYSTEM_PROMPT = `You are the Stahili Welfare Group assistant — friendly, warm, concise, and helpful. You help university Computer Science students with questions about the welfare group.
+
+Key facts:
+- Joining fee: KSh 50 (one-time, paid via M-Pesa)
+- Monthly contribution: KSh 200 (keeps account active)
+- Till number: ${CONFIG.mpesa.till}
+- Loan requests require an active account (monthly contribution paid)
+- Loans are reviewed by the treasurer within 24 hours
+- Registration numbers must start with COM to be eligible for loans
+- Executive team: Chairperson (Isaac Kipngetich), Vice Chairperson (Daisy Sakwa), Secretary (Kelvin Simiyu), Treasurer (Brevian Emmanuel)
+- WhatsApp group available in the About tab
+
+Conversation style:
+- Talk like a helpful, warm human colleague — NOT a robot
+- Keep replies SHORT — 1-3 sentences max unless detail is really needed
+- If someone says "ok", "thanks", "cool", etc — respond naturally like a human would (e.g. "Glad I could help! 😊" or "Anytime!")
+- ONLY escalate to admin (say "I'll flag this for the admin team") if the question is about a specific personal account issue, a complaint, or something you genuinely cannot answer
+- Never keep saying "message sent to admin" for casual conversation`;
 
 function HelpDesk({ member, isTreasurer }) {
   const [threads, setThreads] = useState({});
@@ -972,114 +1063,131 @@ function HelpDesk({ member, isTreasurer }) {
   const [myMessages, setMyMessages] = useState([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const [botTyping, setBotTyping] = useState(false);
-  const [showFAQs, setShowFAQs] = useState(true);
+  const [aiTyping, setAiTyping] = useState(false);
+  const [menuId, setMenuId] = useState(null);
   const bottomRef = useRef(null);
+  const chatHistory = useRef([]); // tracks conversation for Claude context
 
   const fetchAll = useCallback(async () => {
     if (isTreasurer) {
-      const { data } = await supabase.from("help_messages").select("*, members(full_name)").order("created_at", { ascending: true }).limit(500);
+      const { data } = await supabase.from("help_messages")
+        .select("*, members(full_name, avatar_url)")
+        .eq("deleted", false)
+        .order("created_at", { ascending: true })
+        .limit(500);
       const map = {};
       (data ?? []).forEach(m => {
-        const key = m.is_admin_reply ? m.member_id : m.member_id;
-        if (!map[key]) map[key] = { name: m.members?.full_name ?? "Member", msgs: [], lastAt: m.created_at };
+        const key = m.member_id;
+        if (!map[key]) map[key] = { name: m.members?.full_name ?? "Member", avatar: m.members?.avatar_url, msgs: [], lastAt: m.created_at };
         map[key].msgs.push(m);
         map[key].lastAt = m.created_at;
       });
       setThreads(map);
       if (!activeThread && Object.keys(map).length > 0) setActiveThread(Object.keys(map)[0]);
     } else {
-      const { data } = await supabase.from("help_messages").select("*").eq("member_id", member.id).order("created_at", { ascending: true });
-      setMyMessages(data ?? []);
-      if (data && data.length > 0) setShowFAQs(false);
+      const { data } = await supabase.from("help_messages")
+        .select("*")
+        .eq("member_id", member.id)
+        .eq("deleted", false)
+        .order("created_at", { ascending: true });
+      const msgs = data ?? [];
+      setMyMessages(msgs);
+      // Build Claude conversation history
+      chatHistory.current = msgs.map(m => ({
+        role: m.is_admin_reply ? "assistant" : "user",
+        content: m.content,
+      }));
     }
   }, [member.id, isTreasurer, activeThread]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   useEffect(() => {
-    const ch = supabase.channel("help")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "help_messages" }, () => fetchAll())
+    const ch = supabase.channel("help-v2")
+      .on("postgres_changes", { event: "*", schema: "public", table: "help_messages" }, () => fetchAll())
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [fetchAll]);
 
   useEffect(() => {
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
-  }, [myMessages, activeThread, threads, botTyping]);
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 60);
+  }, [myMessages, aiTyping, activeThread]);
 
-  // Find best FAQ match using simple keyword scoring
-  const findFAQMatch = useCallback((query) => {
-    const q = query.toLowerCase();
-    let best = null; let bestScore = 0;
-    FAQS.forEach(faq => {
-      const keywords = faq.q.toLowerCase().split(/\s+/);
-      const score = keywords.filter(k => k.length > 3 && q.includes(k)).length;
-      if (score > bestScore) { best = faq; bestScore = score; }
-    });
-    return bestScore >= 1 ? best : null;
+  useEffect(() => {
+    if (!menuId) return;
+    const close = () => setMenuId(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [menuId]);
+
+  const deleteMsg = useCallback(async (id, everyone) => {
+    if (everyone) {
+      await supabase.from("help_messages").update({ deleted: true, content: "" }).eq("id", id);
+    } else {
+      setMyMessages(prev => prev.filter(m => m.id !== id));
+    }
+    setMenuId(null);
+  }, []);
+
+  // Call Claude via Supabase Edge Function (keeps API key server-side)
+  const getAIReply = useCallback(async (userMessage) => {
+    const history = [
+      ...chatHistory.current,
+      { role: "user", content: userMessage },
+    ];
+    try {
+      const { data, error } = await supabase.functions.invoke("chat-assistant", {
+        body: { messages: history, system: SYSTEM_PROMPT },
+      });
+      if (error) throw error;
+      return data?.reply ?? "I'm not sure about that — let me flag it for the admin team!";
+    } catch (e) {
+      console.error("AI error:", e);
+      return "I'm not sure about that — let me flag it for the admin team!";
+    }
   }, []);
 
   const send = useCallback(async () => {
     const content = text.trim();
     if (!content) return;
-    setSending(true); setText(""); setShowFAQs(false);
+    setSending(true); setText("");
 
     if (isTreasurer) {
-      await supabase.from("help_messages").insert({ member_id: activeThread, content, is_admin_reply: true });
+      await supabase.from("help_messages").insert({ member_id: activeThread, content, is_admin_reply: true, is_bot: false, deleted: false });
       setSending(false); return;
     }
 
     // Save member message
-    await supabase.from("help_messages").insert({ member_id: member.id, content, is_admin_reply: false });
+    await supabase.from("help_messages").insert({ member_id: member.id, content, is_admin_reply: false, is_bot: false, deleted: false });
     setSending(false);
 
-    // Try FAQ match first
-    const match = findFAQMatch(content);
-    if (match) {
-      setBotTyping(true);
-      await new Promise(r => setTimeout(r, 900)); // natural typing delay
-      await supabase.from("help_messages").insert({
-        member_id: member.id,
-        content: match.a,
-        is_admin_reply: true,
-        is_bot: true,
-      });
-      setBotTyping(false);
-    } else {
-      // No match — bot tells them admin will respond
-      setBotTyping(true);
-      await new Promise(r => setTimeout(r, 1200));
-      await supabase.from("help_messages").insert({
-        member_id: member.id,
-        content: "Thanks for reaching out. Your message has been sent to the admin and you'll get a response within 24 hours. 🙏",
-        is_admin_reply: true,
-        is_bot: true,
-      });
-      setBotTyping(false);
-    }
-  }, [text, member.id, isTreasurer, activeThread, findFAQMatch]);
+    // Get AI reply
+    setAiTyping(true);
+    const reply = await getAIReply(content);
+    setAiTyping(false);
 
-  const tapFAQ = useCallback(async (faq) => {
-    setShowFAQs(false);
-    await supabase.from("help_messages").insert({ member_id: member.id, content: faq.q, is_admin_reply: false });
-    setBotTyping(true);
-    await new Promise(r => setTimeout(r, 700));
-    await supabase.from("help_messages").insert({ member_id: member.id, content: faq.a, is_admin_reply: true, is_bot: true });
-    setBotTyping(false);
-  }, [member.id]);
+    await supabase.from("help_messages").insert({
+      member_id: member.id,
+      content: reply,
+      is_admin_reply: true,
+      is_bot: true,
+      deleted: false,
+    });
+  }, [text, member.id, isTreasurer, activeThread, getAIReply]);
+
+  const formatTime = (ts) => new Date(ts).toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" });
 
   // ── Admin view ──
   if (isTreasurer) {
-    const threadList = Object.entries(threads).sort((a,b) => new Date(b[1].lastAt) - new Date(a[1].lastAt));
-    const activeMessages = activeThread ? (threads[activeThread]?.msgs ?? []) : [];
+    const threadList = Object.entries(threads).sort((a,b) => new Date(b[1].lastAt)-new Date(a[1].lastAt));
+    const activeMsgs = activeThread ? (threads[activeThread]?.msgs ?? []) : [];
     return (
       <div className="help-admin-wrap">
         <div className="thread-list">
-          {threadList.length === 0 && <p className="empty-msg" style={{padding:"1rem"}}>No help requests yet.</p>}
-          {threadList.map(([id, { name, msgs }]) => (
+          {threadList.length===0 && <p className="empty-msg" style={{padding:"1.25rem"}}>No messages yet.</p>}
+          {threadList.map(([id,{name,avatar,msgs}]) => (
             <button key={id} className={`thread-item ${activeThread===id?"thread-item-active":""}`} onClick={() => setActiveThread(id)}>
-              <Avatar name={name} size={36} />
+              <Avatar name={name} photo={avatar} size={38} />
               <div className="thread-item-info">
                 <span className="thread-item-name">{name}</span>
                 <span className="thread-item-preview">{msgs[msgs.length-1]?.content ?? ""}</span>
@@ -1089,20 +1197,20 @@ function HelpDesk({ member, isTreasurer }) {
         </div>
         {activeThread && (
           <div className="chat-pane" style={{marginTop:"1rem"}}>
-            <p className="section-label" style={{marginBottom:"0.5rem"}}>Replying to {threads[activeThread]?.name}</p>
+            <p className="help-thread-label">↳ {threads[activeThread]?.name}</p>
             <div className="chat-feed" style={{maxHeight:"260px"}}>
-              {activeMessages.map(m => (
-                <div key={m.id} className={`msg-row ${m.is_admin_reply?"msg-row-me":"msg-row-them"}`}>
-                  <div className="msg-group">
-                    {!m.is_admin_reply && <span className="msg-sender">{threads[activeThread]?.name}</span>}
-                    {m.is_admin_reply && <span className="msg-sender">{m.is_bot ? "🤖 Bot" : "Admin"}</span>}
+              {activeMsgs.map(m => (
+                <div key={m.id} className={`msg-wrap ${m.is_admin_reply?"msg-wrap-me":""}`}>
+                  <div className="msg-col">
+                    {m.is_admin_reply && <span className="msg-name" style={{textAlign:"right"}}>{m.is_bot?"🤖 Assistant":"You (Admin)"}</span>}
                     <div className={`msg-bubble ${m.is_admin_reply?"bubble-me":"bubble-them"}`}>{m.content}</div>
+                    <span className="msg-time">{formatTime(m.created_at)}</span>
                   </div>
                 </div>
               ))}
               <div ref={bottomRef} />
             </div>
-            <ChatInput value={text} onChange={e => setText(e.target.value)} onSend={send} sending={sending} placeholder="Reply as admin…" />
+            <ChatInput value={text} onChange={e=>setText(e.target.value)} onSend={send} sending={sending} placeholder={`Reply to ${threads[activeThread]?.name}…`} />
           </div>
         )}
       </div>
@@ -1113,58 +1221,59 @@ function HelpDesk({ member, isTreasurer }) {
   return (
     <div className="chat-pane">
       <div className="chat-feed">
-        {/* Welcome + FAQs */}
-        {showFAQs && myMessages.length === 0 && (
-          <div className="faq-wrap">
-            <div className="bc-message" style={{marginBottom:"0.5rem"}}>
-              <span className="bc-badge">🤖 Stahili Assistant</span>
-              <p className="bc-text">Hi {member.full_name?.split(" ")[0]} 👋 How can I help you today? Tap a question or type your own.</p>
-            </div>
-            <div className="faq-list">
-              {FAQS.slice(0, 6).map(faq => (
-                <button key={faq.q} className="faq-chip" onClick={() => tapFAQ(faq)}>{faq.q}</button>
-              ))}
-            </div>
+        {myMessages.length===0 && !aiTyping && (
+          <div className="chat-empty-state">
+            <div className="help-bot-avatar">🤖</div>
+            <p style={{fontWeight:600,fontSize:"0.9rem"}}>Stahili Assistant</p>
+            <p className="chat-empty-sub" style={{maxWidth:"220px",textAlign:"center"}}>Hi {member.full_name?.split(" ")[0]} 👋<br/>Ask me anything about the welfare group.</p>
           </div>
         )}
-
         {myMessages.map(m => {
-          const isAdmin = m.is_admin_reply;
+          const isMe = !m.is_admin_reply;
           return (
-            <div key={m.id} className={`msg-row ${!isAdmin?"msg-row-me":"msg-row-them"}`}>
-              {isAdmin && (
-                <div style={{width:28,height:28,borderRadius:"50%",background:"var(--bg)",boxShadow:"var(--neu-out-sm)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>
-                  {m.is_bot ? "🤖" : "👤"}
-                </div>
+            <div key={m.id} className={`msg-wrap ${isMe?"msg-wrap-me":""}`}>
+              {!isMe && (
+                <div className="help-bot-icon">{m.is_bot?"🤖":"👤"}</div>
               )}
-              <div className="msg-group">
-                {isAdmin && <span className="msg-sender">{m.is_bot ? "Assistant" : "Admin"}</span>}
-                <div className={`msg-bubble ${isAdmin?"bubble-them":"bubble-me"}`}>{m.content}</div>
+              <div className="msg-col">
+                {!isMe && <span className="msg-name">{m.is_bot?"Assistant":"Admin"}</span>}
+                <div className="msg-line">
+                  {isMe && (
+                    <div className="msg-actions" onClick={e=>{e.stopPropagation();setMenuId(menuId===m.id?null:m.id);}}>
+                      <span className="msg-action-dot">···</span>
+                      {menuId===m.id && (
+                        <div className="msg-menu">
+                          <button className="msg-menu-item" onClick={()=>deleteMsg(m.id,false)}>Delete for me</button>
+                          <button className="msg-menu-item msg-menu-danger" onClick={()=>deleteMsg(m.id,true)}>Delete for everyone</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className={`msg-bubble ${isMe?"bubble-me":"bubble-them"}`}>{m.content}</div>
+                </div>
+                <span className="msg-time">{formatTime(m.created_at)}</span>
               </div>
             </div>
           );
         })}
-
-        {botTyping && (
-          <div className="msg-row msg-row-them">
-            <div style={{width:28,height:28,borderRadius:"50%",background:"var(--bg)",boxShadow:"var(--neu-out-sm)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>🤖</div>
-            <div className="msg-group">
-              <span className="msg-sender">Assistant</span>
-              <div className="msg-bubble bubble-them typing-dots">
-                <span /><span /><span />
-              </div>
+        {aiTyping && (
+          <div className="msg-wrap">
+            <div className="help-bot-icon">🤖</div>
+            <div className="msg-col">
+              <span className="msg-name">Assistant</span>
+              <div className="msg-bubble bubble-them typing-dots"><span/><span/><span/></div>
             </div>
           </div>
         )}
         <div ref={bottomRef} />
       </div>
-      <ChatInput value={text} onChange={e => setText(e.target.value)} onSend={send} sending={sending} placeholder="Ask anything…" />
+      <ChatInput value={text} onChange={e=>setText(e.target.value)} onSend={send} sending={sending} placeholder="Ask anything…" />
     </div>
   );
 }
 
 // ─── Members View ─────────────────────────────────────────────────────────────
-function MembersView({ member: currentMember }) {
+function MembersView() {
   const { members, loading } = useMembers();
   const [q, setQ] = useState("");
   const filtered = useMemo(() => {
@@ -1174,7 +1283,6 @@ function MembersView({ member: currentMember }) {
   const activeCount = useMemo(() => members.filter(m => m.paid).length, [members]);
 
   if (loading) return <Spinner />;
-
   return (
     <div className="section-stack">
       <div className="members-header">
@@ -1182,13 +1290,13 @@ function MembersView({ member: currentMember }) {
           <p className="section-label" style={{marginBottom:"0.1rem"}}>Members</p>
           <p style={{fontSize:"0.73rem",color:"var(--muted)"}}>{activeCount} of {members.length} active</p>
         </div>
-        <input className="neu-input" style={{maxWidth:"160px",padding:"0.5rem 0.75rem",fontSize:"0.8rem",borderRadius:"999px"}} placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
+        <input className="neu-input" style={{maxWidth:"150px",padding:"0.5rem 0.8rem",fontSize:"0.8rem",borderRadius:"999px"}} placeholder="Search…" value={q} onChange={e=>setQ(e.target.value)} />
       </div>
       <div className="neu-list">
         {filtered.map(m => (
           <div key={m.id} className="neu-list-row" style={{alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:"0.75rem",flex:1,minWidth:0}}>
-              <Avatar name={m.full_name} size={38} />
+              <Avatar name={m.full_name} photo={m.avatar_url} size={38} />
               <div className="row-info">
                 <span className="row-title">{m.full_name}</span>
                 <span className="row-meta">{m.phone ?? m.email ?? ""}</span>
@@ -1197,12 +1305,11 @@ function MembersView({ member: currentMember }) {
             <ActivePill active={m.paid} />
           </div>
         ))}
-        {filtered.length === 0 && <p className="empty-msg" style={{padding:"1.5rem"}}>No members found.</p>}
+        {filtered.length===0 && <p className="empty-msg" style={{padding:"1.5rem"}}>No members found.</p>}
       </div>
     </div>
   );
 }
-
 // ─── About Tab ────────────────────────────────────────────────────────────────
 function AboutTab() {
   return (
@@ -1248,12 +1355,436 @@ function AboutTab() {
     </div>
   );
 }
+// ─── Events Feed (Hero) ───────────────────────────────────────────────────────
+function EventsFeed({ member, isTreasurer }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+  const [creating, setCreating] = useState(false);
+
+  const fetchEvents = useCallback(async () => {
+    const { data } = await supabase.from("events")
+      .select("*, event_contributors(*)")
+      .order("created_at", { ascending: false });
+    setEvents(data ?? []);
+    setLoading(false);
+    if (data?.length > 0 && !expanded) setExpanded(data[0].id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { fetchEvents(); }, [fetchEvents]);
+
+  const typeConfig = {
+    celebration: { emoji: "🎉", color: "#5a9a7a", gradient: "linear-gradient(135deg, #4a8a6a 0%, #6aaa8a 100%)", label: "Celebration" },
+    condolence:  { emoji: "🕊️", color: "#6a7a9a", gradient: "linear-gradient(135deg, #5a6a8a 0%, #7a8aaa 100%)", label: "In Memoriam" },
+    update:      { emoji: "📋", color: "#8a7a5a", gradient: "linear-gradient(135deg, #7a6a4a 0%, #9a8a6a 100%)", label: "Update" },
+    urgent:      { emoji: "⚡", color: "#9a6a6a", gradient: "linear-gradient(135deg, #8a5a5a 0%, #aa7a7a 100%)", label: "Urgent" },
+  };
+
+  const DefaultAvatar = ({ name, size = 32 }) => {
+    const palette = ["#5a9a7a","#6a7a9a","#8a7a5a","#9a6a6a","#7a8a9a","#9a8a6a"];
+    const color = palette[name.charCodeAt(0) % palette.length];
+    return (
+      <div style={{ width:size, height:size, borderRadius:"50%", background:color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:size*0.36, fontWeight:600, color:"#fff", flexShrink:0 }}>
+        {fmt.initials(name)}
+      </div>
+    );
+  };
+
+  if (loading) return <Spinner />;
+
+  if (creating) return (
+    <EventsTab member={member} isTreasurer={isTreasurer} onClose={() => { setCreating(false); fetchEvents(); }} createOnly />
+  );
+
+  return (
+    <div className="events-feed">
+      {/* Section header */}
+      <div className="events-feed-header">
+        <div>
+          <p className="events-feed-label">What's happening</p>
+          <p className="events-feed-sub">Announcements from your welfare group</p>
+        </div>
+        {isTreasurer && (
+          <button className="events-post-btn" onClick={() => setCreating(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Post
+          </button>
+        )}
+      </div>
+
+      {events.length === 0 && (
+        <div className="🕊️ Condolence">
+          <p className="events-empty-title">In Memory of Love Kilwake</p>
+          <p className="events-empty-sub">We extend our deepest condolences to Lecturer Juma Kilwake on the passing of his beloved daughter, Love Kilwake. May her soul rest in eternal peace. As a community, we stand with the Kilwake family during this painful time. Contributions are ongoing — let us show up for one of our own.💚</p>
+        </div>
+      )}
+            {events.length === 0 && (
+        <div className="events-empty">
+          <p className="events-empty-title">Congratulations Wilikister! 🍼</p>
+          <p className="events-empty-sub">We are overjoyed to celebrate Wilikister on the arrival of her newborn. This is a beautiful moment for our community — a new life, a new blessing. May motherhood bring you immeasurable joy. We stand with you in this season. 💚</p>
+        </div>
+      )}
+
+      {/* Event cards — Apple News style */}
+      {events.map((ev, idx) => {
+        const tc = typeConfig[ev.type] ?? typeConfig.update;
+        const isOpen = expanded === ev.id;
+        const isHero = idx === 0;
+        const contribs = ev.event_contributors ?? [];
+
+        return (
+          <div key={ev.id} className={`feed-card ${isHero?"feed-card-hero":""}`}
+            style={isHero ? { "--hero-gradient": tc.gradient } : { "--event-color": tc.color }}>
+
+            {/* Hero card — full visual impact */}
+            {isHero ? (
+              <div className="feed-hero-inner" onClick={() => setExpanded(isOpen ? null : ev.id)}>
+                <div className="feed-hero-bg" style={{background: tc.gradient}} />
+                <div className="feed-hero-content">
+                  <div className="feed-hero-tag">
+                    <span>{tc.emoji}</span>
+                    <span>{tc.label}</span>
+                  </div>
+                  <h2 className="feed-hero-title">{ev.title}</h2>
+                  <p className="feed-hero-body">{ev.body}</p>
+                  <span className="feed-hero-date">{fmt.date(ev.created_at)}</span>
+                </div>
+                {ev.images?.[0] && (
+                  <div className="feed-hero-image">
+                    <img src={ev.images[0]} alt="" />
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Regular card */
+              <div className="feed-regular" onClick={() => setExpanded(isOpen ? null : ev.id)}>
+                <div className="feed-regular-accent" style={{background: tc.color}} />
+                <div className="feed-regular-content">
+                  <div className="feed-regular-tag">
+                    <span>{tc.emoji}</span>
+                    <span style={{color: tc.color}}>{tc.label}</span>
+                    <span className="feed-regular-date">{fmt.date(ev.created_at)}</span>
+                  </div>
+                  <h3 className="feed-regular-title">{ev.title}</h3>
+                  <p className={`feed-regular-body ${isOpen?"":"feed-clamp"}`}>{ev.body}</p>
+                </div>
+                {ev.images?.[0] && (
+                  <div className="feed-regular-thumb">
+                    <img src={ev.images[0]} alt="" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Expanded content */}
+            {isOpen && (
+              <div className="feed-expanded">
+                {/* Extra images */}
+                {ev.images?.length > 1 && (
+                  <div className={`event-img-grid event-img-grid-${Math.min(ev.images.length - 1, 3)}`} style={{margin:"0 0 1rem"}}>
+                    {ev.images.slice(1).map((url, i) => (
+                      <div key={i} className="event-img-cell">
+                        <img src={url} alt="" loading="lazy" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* First image for non-hero cards */}
+                {!isHero && ev.images?.[0] && ev.images.length === 1 && (
+                  <div className="event-img-grid event-img-grid-1" style={{margin:"0 0 1rem"}}>
+                    <div className="event-img-cell"><img src={ev.images[0]} alt="" loading="lazy" /></div>
+                  </div>
+                )}
+
+                {/* Contributors */}
+                {contribs.length > 0 && (
+                  <div className="feed-contribs">
+                    <p className="feed-contribs-label">Contributors</p>
+                    <div className="feed-contribs-list">
+                      {contribs.map((c, i) => (
+                        <div key={i} className="feed-contrib-chip">
+                          <DefaultAvatar name={c.name} size={28} />
+                          <div>
+                            <p className="feed-contrib-name">{c.name}</p>
+                            {c.note && <p className="feed-contrib-note">{c.note}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Events Tab (create + list, used from feed) ────────────────────────────────
+function EventsTab({ member, isTreasurer, onClose, createOnly }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(!createOnly);
+  const [creating, setCreating] = useState(!!createOnly);
+  const [expanded, setExpanded] = useState(null);
+
+  // New event form
+  const [form, setForm] = useState({
+    title: "", body: "", type: "celebration", images: [], contributors: [{ name: "", note: "" }],
+  });
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef(null);
+
+  const fetchEvents = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("events")
+      .select("*, event_contributors(*)")
+      .order("created_at", { ascending: false });
+    setEvents(data ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchEvents(); }, [fetchEvents]);
+
+  const handleImages = useCallback((e) => {
+    const files = Array.from(e.target.files ?? []);
+    const readers = files.map(f => new Promise(res => {
+      const r = new FileReader();
+      r.onload = () => res({ name: f.name, data: r.result, type: f.type });
+      r.readAsDataURL(f);
+    }));
+    Promise.all(readers).then(imgs => setForm(f => ({ ...f, images: [...f.images, ...imgs].slice(0, 4) })));
+  }, []);
+
+  const removeImage = (i) => setForm(f => ({ ...f, images: f.images.filter((_, idx) => idx !== i) }));
+
+  const setContrib = (i, field, val) => {
+    setForm(f => {
+      const c = [...f.contributors];
+      c[i] = { ...c[i], [field]: val };
+      return { ...f, contributors: c };
+    });
+  };
+
+  const saveEvent = useCallback(async () => {
+    if (!form.title.trim() || !form.body.trim()) return;
+    setSaving(true);
+
+    // Upload images to Supabase storage
+    const imageUrls = [];
+    for (const img of form.images) {
+      const path = `events/${Date.now()}-${img.name}`;
+      const base64 = img.data.split(",")[1];
+      const blob = await fetch(img.data).then(r => r.blob());
+      const { data: uploaded } = await supabase.storage.from("event-images").upload(path, blob, { contentType: img.type });
+      if (uploaded) {
+        const { data: { publicUrl } } = supabase.storage.from("event-images").getPublicUrl(path);
+        imageUrls.push(publicUrl);
+      }
+    }
+
+    const { data: ev, error } = await supabase.from("events").insert({
+      title: form.title.trim(),
+      body: form.body.trim(),
+      type: form.type,
+      images: imageUrls,
+      created_by: member.id,
+    }).select("id").single();
+
+    if (!error && ev) {
+      const validContribs = form.contributors.filter(c => c.name.trim());
+      if (validContribs.length > 0) {
+        await supabase.from("event_contributors").insert(
+          validContribs.map(c => ({ event_id: ev.id, name: c.name.trim(), note: c.note.trim() }))
+        );
+      }
+    }
+
+    setSaving(false);
+    setCreating(false);
+    setForm({ title: "", body: "", type: "celebration", images: [], contributors: [{ name: "", note: "" }] });
+    if (onClose) onClose();
+    else fetchEvents();
+  }, [form, member.id, fetchEvents]);
+
+  const typeConfig = {
+    celebration: { emoji: "🎉", color: "#7eb89c", bg: "rgba(126,184,156,0.08)", label: "Celebration" },
+    condolence:  { emoji: "🕊️", color: "#8a9dc3", bg: "rgba(138,157,195,0.08)", label: "Condolence" },
+    update:      { emoji: "📋", color: "#b8a87e", bg: "rgba(184,168,126,0.08)", label: "Update" },
+    urgent:      { emoji: "⚡", color: "#c38a8a", bg: "rgba(195,138,138,0.08)", label: "Urgent" },
+  };
+
+  // Default avatar based on name initial
+  const DefaultAvatar = ({ name, size = 36 }) => {
+    const colors = ["#7eb89c","#8a9dc3","#b8a87e","#c38a8a","#9aabb8","#b89c7e"];
+    const color = colors[name.charCodeAt(0) % colors.length];
+    return (
+      <div style={{ width:size, height:size, borderRadius:"50%", background:color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:size*0.38, fontWeight:600, color:"#fff", flexShrink:0, letterSpacing:"-0.02em" }}>
+        {fmt.initials(name)}
+      </div>
+    );
+  };
+
+  if (loading) return <Spinner />;
+
+  // ── Create form ──
+  if (creating) {
+    const tc = typeConfig[form.type];
+    return (
+      <div className="section-stack">
+        <div className="event-create-header">
+          <h3 className="event-create-title">New Event</h3>
+        <button className="text-link" onClick={() => { setCreating(false); if (onClose) onClose(); }}>Cancel</button>
+        </div>
+
+        {/* Type selector */}
+        <div className="event-type-row">
+          {Object.entries(typeConfig).map(([key, t]) => (
+            <button key={key} className={`event-type-btn ${form.type===key?"event-type-active":""}`}
+              style={form.type===key?{borderColor:t.color,color:t.color}:{}}
+              onClick={() => setForm(f=>({...f,type:key}))}>
+              {t.emoji} {t.label}
+            </button>
+          ))}
+        </div>
+
+        <NeuCard>
+          <div className="form-stack">
+            <NeuInput label="Title" placeholder="e.g. Congratulations Wilikister!" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} />
+            <div className="neu-field">
+              <label className="neu-label">Announcement</label>
+              <textarea className="neu-input neu-textarea" rows={4} placeholder="Write a warm, clear message…" value={form.body} onChange={e=>setForm(f=>({...f,body:e.target.value}))} />
+            </div>
+          </div>
+        </NeuCard>
+
+        {/* Images */}
+        <NeuCard>
+          <p className="section-label" style={{marginBottom:"0.75rem"}}>Images (up to 4)</p>
+          <div className="event-images-grid">
+            {form.images.map((img, i) => (
+              <div key={i} className="event-img-thumb">
+                <img src={img.data} alt="" />
+                <button className="event-img-remove" onClick={() => removeImage(i)}>✕</button>
+              </div>
+            ))}
+            {form.images.length < 4 && (
+              <button className="event-img-add" onClick={() => fileRef.current?.click()}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={handleImages} />
+        </NeuCard>
+
+        {/* Contributors */}
+        <NeuCard>
+          <p className="section-label" style={{marginBottom:"0.75rem"}}>Contributors</p>
+          <div className="form-stack">
+            {form.contributors.map((c, i) => (
+              <div key={i} className="contrib-row">
+                <input className="neu-input" placeholder="Name" value={c.name} onChange={e=>setContrib(i,"name",e.target.value)} style={{flex:1}} />
+                <input className="neu-input" placeholder="Note (optional)" value={c.note} onChange={e=>setContrib(i,"note",e.target.value)} style={{flex:1.5}} />
+                {form.contributors.length > 1 && <button className="text-link" style={{color:"var(--danger)",fontSize:"1rem"}} onClick={()=>setForm(f=>({...f,contributors:f.contributors.filter((_,j)=>j!==i)}))}>✕</button>}
+              </div>
+            ))}
+            <button className="text-link" onClick={()=>setForm(f=>({...f,contributors:[...f.contributors,{name:"",note:""}]}))}>+ Add contributor</button>
+          </div>
+        </NeuCard>
+
+        <NeuBtn full loading={saving} onClick={saveEvent}>Post Event</NeuBtn>
+      </div>
+    );
+  }
+
+  // ── Events list ──
+  return (
+    <div className="section-stack">
+      {isTreasurer && (
+        <NeuBtn full onClick={() => setCreating(true)} variant="primary">
+          + New Event
+        </NeuBtn>
+      )}
+
+      {events.length === 0 && (
+        <div className="chat-empty-state">
+          <div className="chat-empty-icon">📅</div>
+          <p>No events yet</p>
+          <p className="chat-empty-sub">Events and announcements will appear here.</p>
+        </div>
+      )}
+
+      {events.map(ev => {
+        const tc = typeConfig[ev.type] ?? typeConfig.update;
+        const isOpen = expanded === ev.id;
+        const contribs = ev.event_contributors ?? [];
+
+        return (
+          <div key={ev.id} className="event-card" style={{"--event-color": tc.color, "--event-bg": tc.bg}}>
+            {/* Header */}
+            <div className="event-card-header" onClick={() => setExpanded(isOpen ? null : ev.id)}>
+              <div className="event-type-pip" style={{background: tc.color}}>{tc.emoji}</div>
+              <div className="event-card-meta">
+                <span className="event-type-label" style={{color: tc.color}}>{tc.label}</span>
+                <h3 className="event-title">{ev.title}</h3>
+                <span className="event-date">{fmt.date(ev.created_at)}</span>
+              </div>
+              <div className={`event-chevron ${isOpen?"event-chevron-open":""}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+            </div>
+
+            {/* Always show first 2 lines */}
+            <p className={`event-body ${isOpen?"event-body-open":""}`}>{ev.body}</p>
+
+            {isOpen && (
+              <>
+                {/* Images */}
+                {ev.images?.length > 0 && (
+                  <div className={`event-img-grid event-img-grid-${ev.images.length}`}>
+                    {ev.images.map((url, i) => (
+                      <div key={i} className="event-img-cell">
+                        <img src={url} alt="" loading="lazy" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Contributors */}
+                {contribs.length > 0 && (
+                  <div className="event-contribs">
+                    <p className="section-label" style={{marginBottom:"0.6rem"}}>Contributors</p>
+                    <div className="event-contrib-list">
+                      {contribs.map((c, i) => (
+                        <div key={i} className="event-contrib-item">
+                          <DefaultAvatar name={c.name} size={32} />
+                          <div>
+                            <p className="event-contrib-name">{c.name}</p>
+                            {c.note && <p className="event-contrib-note">{c.note}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardPage({ member, onLogout }) {
   const { loans, loading: loansLoading } = useLoans(member.id);
   const { contributions } = useContributions(member.id);
   const ann = useAnnouncement();
-  const [tab, setTab] = useState("contribute");
+  const [tab, setTab] = useState(null); // null = home feed
+  const isTreasurer = member.email === CONFIG.treasurer.email;
 
   const isActive = useMemo(() => contributions.some(c => c.month_key===fmt.monthKey() && c.status==="confirmed"), [contributions]);
   const stats = useMemo(() => ({
@@ -1267,7 +1798,7 @@ function DashboardPage({ member, onLogout }) {
     ["contribute", "Contribute", null],
     ["loans", "Loans", pendingCount || null],
     ["request", "Request", null],
-    ["connect", "Connect", null],
+    ["community", "Community", null],
     ["about", "About", null],
   ];
 
@@ -1275,65 +1806,87 @@ function DashboardPage({ member, onLogout }) {
     <div className="dash-page">
       <AnnouncementBanner ann={ann} />
 
-      <header className="dash-header">
-        <div>
-          <p className="dash-eyebrow">Welcome back</p>
-          <h2 className="dash-name">{member.full_name}</h2>
+      {/* ── Top bar ── */}
+      <header className="dash-top-bar">
+        <div className="dash-top-left">
+          {tab && (
+            <button className="dash-back-btn" onClick={() => setTab(null)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+          )}
+          <div>
+            {!tab && <p className="dash-eyebrow">Welcome back</p>}
+            <h2 className="dash-name">{tab ? (() => { const t = TABS.find(t=>t[0]===tab); return t?.[1] ?? ""; })() : member.full_name}</h2>
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:"0.75rem"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"0.6rem"}}>
           <ActivePill active={isActive} />
           <button className="text-link" onClick={onLogout}>Sign out</button>
         </div>
       </header>
 
-      <div className="stats-row">
-        {[{l:"Requests",v:stats.total},{l:"Approved",v:stats.approved},{l:"Borrowed",v:fmt.currency(stats.borrowed)}].map(({l,v}) => (
-          <div key={l} className="stat-tile">
-            <span className="stat-val">{v}</span>
-            <span className="stat-lbl">{l}</span>
-          </div>
-        ))}
-      </div>
-
-      <nav className="tab-bar">
-        {TABS.map(([key,label,badge]) => (
-          <button key={key} className={`tab-btn ${tab===key?"tab-btn-active":""}`} onClick={() => setTab(key)}>
-            {label}{badge && <span className="tab-badge">{badge}</span>}
-          </button>
-        ))}
-      </nav>
-
-      <div className="tab-body">
-        {tab==="contribute" && <ContributionModule member={member} onPhoneAdded={(phone) => { member.phone = phone; }} />}
-        {tab==="loans" && (
-          <div className="section-stack">
-            {loansLoading ? <Spinner /> : loans.length===0 ? (
-              <div className="empty-state">
-                <p>No loan requests yet.</p>
-                <button className="text-link" onClick={() => setTab("request")}>Make your first request →</button>
+      {/* ── Home feed (no tab selected) ── */}
+      {!tab && (
+        <div className="home-feed">
+          {/* Stats strip */}
+          <div className="stats-strip">
+            {[{l:"Requests",v:stats.total},{l:"Approved",v:stats.approved},{l:"Borrowed",v:fmt.currency(stats.borrowed)}].map(({l,v}) => (
+              <div key={l} className="stat-tile">
+                <span className="stat-val">{v}</span>
+                <span className="stat-lbl">{l}</span>
               </div>
-            ) : (
-              <div className="neu-list">
-                {loans.map(loan => (
-                  <div key={loan.id} className={`neu-list-row row-accent-${loan.status}`}>
-                    <div className="row-info">
-                      <span className="row-title">{loan.description}</span>
-                      <span className="row-meta">{fmt.date(loan.created_at)}</span>
-                    </div>
-                    <div className="row-right">
-                      {loan.amount > 0 && <span className="row-amount">{fmt.currency(loan.amount)}</span>}
-                      <StatusBadge status={loan.status} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            ))}
           </div>
-        )}
-        {tab==="request"   && <LoanModule member={member} isActive={isActive} />}
-        {tab==="connect"   && <ConnectHub member={member} />}
-        {tab==="about"     && <AboutTab />}
-      </div>
+
+          {/* Events hero — full width, no tab */}
+          <EventsFeed member={member} isTreasurer={isTreasurer} />
+
+          {/* Quick actions */}
+          <div className="quick-actions">
+            {TABS.map(([key, label, badge]) => (
+              <button key={key} className="quick-action-btn" onClick={() => setTab(key)}>
+                <span className="quick-action-label">{label}</span>
+                {badge && <span className="quick-action-badge">{badge}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab content ── */}
+      {tab && (
+        <div className="tab-body" style={{paddingTop:"0.5rem"}}>
+          {tab==="contribute" && <ContributionModule member={member} onPhoneAdded={(phone) => { member.phone = phone; }} />}
+          {tab==="loans" && (
+            <div className="section-stack">
+              {loansLoading ? <Spinner /> : loans.length===0 ? (
+                <div className="empty-state">
+                  <p>No loan requests yet.</p>
+                  <button className="text-link" onClick={() => setTab("request")}>Make your first request →</button>
+                </div>
+              ) : (
+                <div className="neu-list">
+                  {loans.map(loan => (
+                    <div key={loan.id} className={`neu-list-row row-accent-${loan.status}`}>
+                      <div className="row-info">
+                        <span className="row-title">{loan.description}</span>
+                        <span className="row-meta">{fmt.date(loan.created_at)}</span>
+                      </div>
+                      <div className="row-right">
+                        {loan.amount > 0 && <span className="row-amount">{fmt.currency(loan.amount)}</span>}
+                        <StatusBadge status={loan.status} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {tab==="request"   && <LoanModule member={member} isActive={isActive} />}
+          {tab==="community" && <ConnectHub member={member} />}
+          {tab==="about"     && <AboutTab />}
+        </div>
+      )}
     </div>
   );
 }
@@ -1860,45 +2413,49 @@ const CSS = `
   .empty-state { color: var(--muted); font-size: 0.875rem; padding: 3rem 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
   .empty-msg { text-align: center; color: var(--muted); font-size: 0.82rem; padding: 2rem 0; }
 
-  /* ── Connect / Chat ── */
+  /* ── Community / Chat ── */
   .connect-wrap { display: flex; flex-direction: column; gap: 1rem; }
-  .seg-control { display: flex; background: var(--bg); box-shadow: var(--neu-in); border-radius: 12px; padding: 3px; gap: 2px; }
-  .seg-btn { flex: 1; padding: 0.45rem 0.5rem; font-family: var(--font-body); font-size: 0.74rem; font-weight: 500; color: var(--muted); background: transparent; border: none; border-radius: 9px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+  .seg-control { display: flex; background: var(--bg); box-shadow: var(--neu-in); border-radius: 14px; padding: 3px; gap: 2px; }
+  .seg-btn { flex: 1; padding: 0.46rem 0.5rem; font-family: var(--font-body); font-size: 0.75rem; font-weight: 500; color: var(--muted); background: transparent; border: none; border-radius: 11px; cursor: pointer; transition: all 0.22s; white-space: nowrap; }
   .seg-active { background: var(--bg); color: var(--accent2); font-weight: 700; box-shadow: var(--neu-out-sm); }
-
   .chat-pane { display: flex; flex-direction: column; gap: 0.6rem; }
-  .chat-feed { display: flex; flex-direction: column; gap: 0.35rem; max-height: 55svh; min-height: 260px; overflow-y: auto; padding: 0.5rem 0; scrollbar-width: none; }
+  .chat-feed { display: flex; flex-direction: column; gap: 0.25rem; max-height: 56svh; min-height: 260px; overflow-y: auto; padding: 0.25rem 0 0.5rem; scrollbar-width: none; }
   .chat-feed::-webkit-scrollbar { display: none; }
-  .chat-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.35rem; padding: 3rem 0; color: var(--muted); font-size: 0.82rem; text-align: center; }
-  .chat-empty-icon { font-size: 2rem; margin-bottom: 0.25rem; }
-  .chat-empty-sub { font-size: 0.74rem; color: var(--muted); opacity: 0.7; }
-
-  .msg-row { display: flex; align-items: flex-end; gap: 0.5rem; max-width: 85%; }
-  .msg-row-me { align-self: flex-end; flex-direction: row-reverse; }
-  .msg-row-them { align-self: flex-start; }
-  .msg-group { display: flex; flex-direction: column; gap: 0.15rem; }
-  .msg-row-me .msg-group { align-items: flex-end; }
-  .msg-sender { font-size: 0.62rem; font-weight: 700; color: var(--muted); padding: 0 0.5rem; letter-spacing: 0.02em; }
-  .msg-bubble { padding: 0.6rem 0.95rem; border-radius: 18px; font-size: 0.86rem; line-height: 1.45; word-break: break-word; max-width: 100%; }
+  .chat-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem; padding: 2.5rem 1rem; color: var(--muted); font-size: 0.82rem; text-align: center; }
+  .chat-empty-icon { font-size: 2.2rem; margin-bottom: 0.2rem; }
+  .chat-empty-sub { font-size: 0.74rem; color: var(--muted); opacity: 0.7; line-height: 1.5; }
+  .help-bot-avatar { font-size: 2.2rem; width: 56px; height: 56px; background: var(--bg); box-shadow: var(--neu-out-sm); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 0.2rem; }
+  .help-bot-icon { width: 26px; height: 26px; background: var(--bg); box-shadow: var(--neu-out-sm); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; align-self: flex-end; }
+  .msg-wrap { display: flex; align-items: flex-end; gap: 0.45rem; max-width: 82%; animation: fadeUp 0.18s ease both; }
+  .msg-wrap-me { align-self: flex-end; flex-direction: row-reverse; }
+  .msg-wrap:not(.msg-wrap-me) { align-self: flex-start; }
+  .msg-col { display: flex; flex-direction: column; gap: 0.12rem; }
+  .msg-wrap-me .msg-col { align-items: flex-end; }
+  .msg-name { font-size: 0.62rem; font-weight: 700; color: var(--muted); padding: 0 0.4rem; letter-spacing: 0.01em; }
+  .msg-line { display: flex; align-items: center; gap: 0.35rem; }
+  .msg-wrap-me .msg-line { flex-direction: row-reverse; }
+  .msg-time { font-size: 0.58rem; color: var(--muted); padding: 0 0.4rem; opacity: 0.75; }
+  .msg-bubble { padding: 0.58rem 0.95rem; border-radius: 18px; font-size: 0.875rem; line-height: 1.5; word-break: break-word; max-width: 100%; }
   .bubble-them { background: var(--bg); box-shadow: var(--neu-out-sm); color: var(--fg); border-bottom-left-radius: 5px; }
-  .bubble-me { background: linear-gradient(135deg, var(--accent2), var(--accent)); color: #fff; border-bottom-right-radius: 5px; }
-  .bubble-admin { background: linear-gradient(135deg, #5a7a9a, #7a9ab8); color: #fff; border-radius: 12px; text-align: center; }
-  .msg-time { font-size: 0.58rem; color: var(--muted); padding: 0 0.5rem; }
-
-  .bc-message { align-self: center; text-align: center; background: var(--bg); box-shadow: var(--neu-out-sm); border-radius: 12px; padding: 0.75rem 1.1rem; max-width: 90%; display: flex; flex-direction: column; gap: 0.25rem; }
-  .bc-badge { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent2); }
-  .bc-text { font-size: 0.84rem; color: var(--fg); line-height: 1.4; }
-
-  .chat-composer { display: flex; align-items: center; gap: 0.5rem; background: var(--bg); box-shadow: var(--neu-in); border-radius: 999px; padding: 0.3rem 0.3rem 0.3rem 1rem; }
-  .chat-composer-input { flex: 1; background: transparent; border: none; outline: none; font-family: var(--font-body); font-size: 0.875rem; color: var(--fg); }
+  .bubble-me { background: linear-gradient(140deg, #6b82b8, #8b9dc3); color: #fff; border-bottom-right-radius: 5px; box-shadow: 3px 3px 10px rgba(107,130,184,0.35); }
+  .msg-actions { position: relative; }
+  .msg-action-dot { font-size: 0.75rem; color: var(--muted); cursor: pointer; padding: 0.25rem 0.35rem; border-radius: 6px; opacity: 0; user-select: none; transition: opacity 0.15s; }
+  .msg-wrap:hover .msg-action-dot { opacity: 1; }
+  .msg-menu { position: absolute; bottom: 100%; right: 0; background: var(--surface); box-shadow: 0 4px 20px rgba(0,0,0,0.15); border-radius: var(--r-sm); overflow: hidden; min-width: 160px; z-index: 50; border: 0.5px solid var(--border); }
+  .msg-menu-item { display: block; width: 100%; padding: 0.7rem 1rem; font-family: var(--font-body); font-size: 0.8rem; font-weight: 500; color: var(--fg); background: none; border: none; cursor: pointer; text-align: left; transition: background 0.15s; }
+  .msg-menu-item:hover { background: var(--surface2); }
+  .msg-menu-danger { color: var(--danger); }
+  .bc-pill { align-self: center; display: flex; align-items: center; gap: 0.5rem; background: var(--bg); box-shadow: var(--neu-out-sm); border-radius: 999px; padding: 0.4rem 1rem; font-size: 0.78rem; color: var(--fg2); max-width: 90%; }
+  .bc-pip { font-size: 13px; flex-shrink: 0; }
+  .bc-composer { display: flex; align-items: center; gap: 0.5rem; background: color-mix(in srgb, var(--accent) 7%, var(--bg)); box-shadow: var(--neu-in-sm); border-radius: 999px; padding: 0.28rem 0.28rem 0.28rem 0.85rem; }
+  .chat-composer { display: flex; align-items: center; gap: 0.5rem; background: var(--bg); box-shadow: var(--neu-in); border-radius: 999px; padding: 0.28rem 0.28rem 0.28rem 1.1rem; }
+  .chat-composer-input { flex: 1; background: transparent; border: none; outline: none; font-family: var(--font-body); font-size: 0.875rem; color: var(--fg); min-width: 0; }
   .chat-composer-input::placeholder { color: var(--muted); }
-  .chat-send-btn { width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; background: var(--bg); box-shadow: var(--neu-out-sm); color: var(--muted); transition: all 0.2s; flex-shrink: 0; font-size: 14px; }
-  .chat-send-active { background: linear-gradient(135deg, var(--accent2), var(--accent)); color: #fff; box-shadow: 3px 3px 8px rgba(139,157,195,0.4); }
-
-  .bc-composer { display: flex; align-items: center; gap: 0.5rem; background: color-mix(in srgb, var(--accent) 8%, var(--bg)); box-shadow: var(--neu-in-sm); border-radius: 999px; padding: 0.3rem 0.3rem 0.3rem 0.75rem; }
-  .bc-composer-label { font-size: 14px; flex-shrink: 0; }
-
+  .chat-send-btn { width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; background: var(--bg); box-shadow: var(--neu-out-sm); color: var(--muted); transition: all 0.2s; flex-shrink: 0; }
+  .chat-send-active { background: linear-gradient(140deg, #6b82b8, #8b9dc3); color: #fff; box-shadow: 3px 3px 10px rgba(107,130,184,0.4); }
+  .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .help-admin-wrap { display: flex; flex-direction: column; gap: 0.75rem; }
+  .help-thread-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.25rem; }
   .thread-list { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
   .thread-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1.1rem; background: var(--surface); border: none; cursor: pointer; text-align: left; transition: background 0.15s; width: 100%; }
   .thread-item:hover { background: var(--surface2); }
@@ -1906,20 +2463,173 @@ const CSS = `
   .thread-item-info { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 0; }
   .thread-item-name { font-size: 0.84rem; font-weight: 600; color: var(--fg); }
   .thread-item-preview { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  .members-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
-
-  .faq-wrap { display: flex; flex-direction: column; gap: 0.6rem; align-items: center; padding: 0.5rem 0; }
-  .faq-list { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
-  .faq-chip { background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 999px; padding: 0.45rem 1rem; font-family: var(--font-body); font-size: 0.78rem; font-weight: 500; color: var(--accent2); cursor: pointer; transition: all 0.2s; text-align: left; }
-  .faq-chip:hover { box-shadow: var(--neu-btn-hover); }
-  .faq-chip:active { box-shadow: var(--neu-in-sm); transform: scale(0.98); }
-
-  .typing-dots { display: flex; align-items: center; gap: 4px; padding: 0.65rem 1rem; }
+  .members-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .typing-dots { display: flex; align-items: center; gap: 4px; padding: 0.6rem 0.95rem !important; }
   .typing-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: typingBounce 1.2s ease-in-out infinite; }
-  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes typingBounce { 0%,60%,100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-5px); opacity: 1; } }
+  .typing-dots span:nth-child(2) { animation-delay: 0.18s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.36s; }
+  @keyframes typingBounce { 0%,60%,100%{transform:translateY(0);opacity:0.35;} 30%{transform:translateY(-5px);opacity:1;} }
+  .faq-wrap { display: flex; flex-direction: column; gap: 0.6rem; align-items: center; }
+  .faq-list { display: flex; flex-wrap: wrap; gap: 0.45rem; justify-content: center; }
+  .faq-chip { background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 999px; padding: 0.42rem 0.9rem; font-family: var(--font-body); font-size: 0.76rem; font-weight: 500; color: var(--accent2); cursor: pointer; transition: all 0.18s; }
+  .faq-chip:hover { box-shadow: var(--neu-btn-hover); }
+  .faq-chip:active { box-shadow: var(--neu-in-sm); transform: scale(0.97); }
+
+  /* ── Home feed layout ── */
+  .home-feed { display: flex; flex-direction: column; }
+  .stats-strip { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.6rem; margin: 0 1.5rem 0; }
+  .dash-top-bar { display: flex; align-items: center; justify-content: space-between; padding: 2.5rem 1.5rem 1rem; gap: 1rem; }
+  .dash-top-left { display: flex; align-items: center; gap: 0.6rem; }
+  .dash-back-btn { background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--fg); flex-shrink: 0; transition: all 0.2s; }
+  .dash-back-btn:active { box-shadow: var(--neu-in-sm); }
+
+  /* Quick actions row */
+  .quick-actions { display: flex; gap: 0.5rem; overflow-x: auto; padding: 0 1.5rem 1rem; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .quick-actions::-webkit-scrollbar { display: none; }
+  .quick-action-btn { flex-shrink: 0; display: flex; align-items: center; gap: 0.4rem; background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 999px; padding: 0.5rem 1.1rem; font-family: var(--font-body); font-size: 0.78rem; font-weight: 600; color: var(--fg2); cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+  .quick-action-btn:active { box-shadow: var(--neu-in-sm); }
+  .quick-action-badge { background: var(--accent); color: #fff; font-size: 0.6rem; font-weight: 700; border-radius: 999px; padding: 0.1rem 0.4rem; min-width: 16px; text-align: center; }
+
+  /* ── Events feed ── */
+  .events-feed { padding: 1.25rem 1.5rem 0.5rem; display: flex; flex-direction: column; gap: 0.85rem; }
+  .events-feed-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
+  .events-feed-label { font-family: var(--font-head); font-size: 1.25rem; font-weight: 400; color: var(--fg); line-height: 1.2; }
+  .events-feed-sub { font-size: 0.73rem; color: var(--muted); margin-top: 0.1rem; }
+  .events-post-btn { display: flex; align-items: center; gap: 0.35rem; background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 999px; padding: 0.42rem 0.9rem; font-family: var(--font-body); font-size: 0.77rem; font-weight: 600; color: var(--accent2); cursor: pointer; transition: all 0.2s; }
+  .events-post-btn:active { box-shadow: var(--neu-in-sm); }
+  .events-empty { text-align: center; padding: 2.5rem 1rem; }
+  .events-empty-title { font-family: var(--font-head); font-size: 1rem; font-weight: 400; color: var(--fg); margin-bottom: 0.35rem; }
+  .events-empty-sub { font-size: 0.78rem; color: var(--muted); line-height: 1.5; }
+
+  /* Hero card */
+  .feed-card { background: var(--bg); box-shadow: var(--neu-out); border-radius: var(--r); overflow: hidden; transition: box-shadow 0.2s; }
+  .feed-card-hero { box-shadow: var(--neu-out); }
+  .feed-hero-inner { position: relative; cursor: pointer; min-height: 200px; display: flex; flex-direction: column; overflow: hidden; }
+  .feed-hero-bg { position: absolute; inset: 0; opacity: 0.92; }
+  .feed-hero-content { position: relative; z-index: 2; padding: 1.5rem 1.5rem 1.25rem; flex: 1; }
+  .feed-hero-tag { display: inline-flex; align-items: center; gap: 0.4rem; background: rgba(255,255,255,0.18); backdrop-filter: blur(8px); border-radius: 999px; padding: 0.28rem 0.75rem; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.92); margin-bottom: 0.75rem; }
+  .feed-hero-title { font-family: var(--font-head); font-size: clamp(1.2rem, 4vw, 1.6rem); font-weight: 400; color: #fff; line-height: 1.2; margin-bottom: 0.6rem; }
+  .feed-hero-body { font-size: 0.85rem; color: rgba(255,255,255,0.82); line-height: 1.6; margin-bottom: 0.75rem; }
+  .feed-hero-date { font-size: 0.65rem; color: rgba(255,255,255,0.6); font-weight: 500; }
+  .feed-hero-image { position: relative; z-index: 1; width: 100%; aspect-ratio: 16/9; }
+  .feed-hero-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* Regular card */
+  .feed-regular { display: flex; gap: 0; cursor: pointer; padding: 1.1rem 1.1rem 1.1rem 1.25rem; position: relative; }
+  .feed-regular-accent { position: absolute; left: 0; top: 0; bottom: 0; width: 3.5px; border-radius: 3.5px 0 0 3.5px; }
+  .feed-regular-content { flex: 1; min-width: 0; padding-left: 0.25rem; }
+  .feed-regular-tag { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; }
+  .feed-regular-tag span:first-child { font-size: 14px; }
+  .feed-regular-tag span:nth-child(2) { font-size: 0.63rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .feed-regular-date { font-size: 0.63rem; color: var(--muted); margin-left: auto; }
+  .feed-regular-title { font-family: var(--font-head); font-size: 0.95rem; font-weight: 400; color: var(--fg); line-height: 1.3; margin-bottom: 0.3rem; }
+  .feed-regular-body { font-size: 0.8rem; color: var(--muted); line-height: 1.55; }
+  .feed-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .feed-regular-thumb { width: 72px; height: 72px; border-radius: var(--r-sm); overflow: hidden; flex-shrink: 0; margin-left: 0.75rem; align-self: center; }
+  .feed-regular-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+  /* Expanded content */
+  .feed-expanded { padding: 0 1.1rem 1.1rem; animation: fadeUp 0.22s ease both; }
+  .feed-contribs { margin-top: 0.75rem; }
+  .feed-contribs-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; }
+  .feed-contribs-list { display: flex; flex-direction: column; gap: 0.55rem; }
+  .feed-contrib-chip { display: flex; align-items: center; gap: 0.65rem; }
+  .feed-contrib-name { font-size: 0.83rem; font-weight: 600; color: var(--fg); }
+  .feed-contrib-note { font-size: 0.7rem; color: var(--muted); }
+
+  /* ── Events ── */
+  .event-create-header { display: flex; align-items: center; justify-content: space-between; }
+  .event-create-title { font-family: var(--font-head); font-size: 1.1rem; font-weight: 400; }
+  .event-type-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .event-type-btn { background: var(--bg); box-shadow: var(--neu-out-sm); border: 1.5px solid transparent; border-radius: 999px; padding: 0.4rem 0.9rem; font-family: var(--font-body); font-size: 0.75rem; font-weight: 500; color: var(--muted); cursor: pointer; transition: all 0.2s; }
+  .event-type-active { box-shadow: var(--neu-in-sm); }
+  .contrib-row { display: flex; gap: 0.5rem; align-items: center; }
+
+  .event-images-grid { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .event-img-thumb { position: relative; width: 72px; height: 72px; border-radius: var(--r-sm); overflow: hidden; }
+  .event-img-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .event-img-remove { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff; border: none; cursor: pointer; font-size: 9px; display: flex; align-items: center; justify-content: center; }
+  .event-img-add { width: 72px; height: 72px; border-radius: var(--r-sm); background: var(--bg); box-shadow: var(--neu-in-sm); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--muted); transition: all 0.2s; }
+  .event-img-add:hover { color: var(--accent2); }
+
+  /* Event card */
+  .event-card { background: var(--bg); box-shadow: var(--neu-out); border-radius: var(--r); overflow: hidden; transition: box-shadow 0.2s; border-left: 3px solid var(--event-color, var(--accent)); }
+  .event-card-header { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.25rem 1.25rem 0; cursor: pointer; user-select: none; }
+  .event-type-pip { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; opacity: 0.9; }
+  .event-card-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+  .event-type-label { font-size: 0.63rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+  .event-title { font-family: var(--font-head); font-size: 1rem; font-weight: 400; color: var(--fg); line-height: 1.3; }
+  .event-date { font-size: 0.65rem; color: var(--muted); }
+  .event-chevron { color: var(--muted); transition: transform 0.25s cubic-bezier(0.4,0,0.2,1); flex-shrink: 0; margin-top: 0.25rem; }
+  .event-chevron-open { transform: rotate(180deg); }
+  .event-body { font-size: 0.85rem; color: var(--fg2); line-height: 1.6; padding: 0.75rem 1.25rem 1.25rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .event-body-open { -webkit-line-clamp: unset; overflow: visible; }
+
+  /* Event images grid — adapts to count */
+  .event-img-grid { display: grid; gap: 2px; margin: 0 1.25rem 1rem; border-radius: var(--r-sm); overflow: hidden; max-height: 320px; }
+  .event-img-grid-1 { grid-template-columns: 1fr; }
+  .event-img-grid-2 { grid-template-columns: 1fr 1fr; }
+  .event-img-grid-3 { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; }
+  .event-img-grid-3 .event-img-cell:first-child { grid-column: 1 / -1; }
+  .event-img-grid-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .event-img-cell { overflow: hidden; aspect-ratio: 16/9; }
+  .event-img-cell img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.3s; }
+  .event-img-cell:hover img { transform: scale(1.03); }
+
+  /* Contributors */
+  .event-contribs { padding: 0 1.25rem 1.25rem; }
+  .event-contrib-list { display: flex; flex-direction: column; gap: 0.6rem; }
+  .event-contrib-item { display: flex; align-items: center; gap: 0.7rem; }
+  .event-contrib-name { font-size: 0.84rem; font-weight: 600; color: var(--fg); }
+  .event-contrib-note { font-size: 0.72rem; color: var(--muted); }
+
+  /* Pinned message */
+  .pinned-bar { display: flex; align-items: center; gap: 0.6rem; background: var(--bg); box-shadow: var(--neu-out-sm); border-radius: var(--r-sm); padding: 0.6rem 0.9rem; border-left: 3px solid var(--accent); }
+  .pinned-icon { font-size: 13px; flex-shrink: 0; }
+  .pinned-content { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 0; }
+  .pinned-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent2); }
+  .pinned-text { font-size: 0.78rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pinned-close { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 12px; padding: 0.2rem; flex-shrink: 0; }
+
+  /* Select mode */
+  .select-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; background: var(--bg); box-shadow: var(--neu-in-sm); border-radius: var(--r-sm); font-size: 0.82rem; font-weight: 600; color: var(--accent2); }
+  .msg-selected { background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--r-sm); }
+  .select-circle { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border2); flex-shrink: 0; background: var(--bg); transition: all 0.15s; }
+  .select-circle-on { background: var(--accent2); border-color: var(--accent2); }
+
+  /* Message bubble wrap (contains reply + bubble) */
+  .msg-bubble-wrap { display: flex; flex-direction: column; gap: 0; }
+
+  /* Reply preview inside bubble */
+  .reply-preview { background: rgba(0,0,0,0.06); border-left: 3px solid rgba(107,130,184,0.5); border-radius: 10px 10px 0 0; padding: 0.35rem 0.7rem; margin-bottom: -4px; }
+  .reply-me { border-left-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.12); }
+  .reply-sender { display: block; font-size: 0.62rem; font-weight: 700; color: var(--accent2); margin-bottom: 0.1rem; }
+  .reply-me .reply-sender { color: rgba(255,255,255,0.8); }
+  .reply-text { display: block; font-size: 0.72rem; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reply-me .reply-text { color: rgba(255,255,255,0.7); }
+
+  /* Reply bar above composer */
+  .reply-bar { display: flex; align-items: center; gap: 0.6rem; background: var(--bg); box-shadow: var(--neu-in-sm); border-radius: var(--r-sm); padding: 0.55rem 0.9rem; border-left: 3px solid var(--accent2); }
+  .reply-bar-content { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 0; }
+  .reply-bar-sender { font-size: 0.65rem; font-weight: 700; color: var(--accent2); }
+  .reply-bar-text { font-size: 0.75rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reply-bar-close { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 13px; padding: 0.2rem; flex-shrink: 0; }
+
+  /* Emoji picker */
+  .emoji-bar { display: flex; gap: 0.3rem; background: var(--bg); box-shadow: var(--neu-out); border-radius: 999px; padding: 0.3rem 0.5rem; margin-top: 0.3rem; animation: fadeUp 0.15s ease both; }
+  .emoji-bar-me { align-self: flex-end; }
+  .emoji-btn { background: none; border: none; cursor: pointer; font-size: 18px; padding: 0.15rem; border-radius: 50%; transition: transform 0.15s; line-height: 1; }
+  .emoji-btn:hover { transform: scale(1.3); }
+
+  /* Reaction pills */
+  .reaction-row { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem; }
+  .reaction-row-me { justify-content: flex-end; }
+  .reaction-pill { display: inline-flex; align-items: center; gap: 0.2rem; background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 999px; padding: 0.18rem 0.55rem; font-size: 13px; cursor: pointer; transition: all 0.15s; }
+  .reaction-pill span { font-size: 0.68rem; font-weight: 700; color: var(--accent2); }
+  .reaction-pill:hover { box-shadow: var(--neu-btn-hover); }
+
+  /* Context menu improvements */
+  .msg-menu-right { right: auto; left: 0; }
 
   /* ── Animations ── */
   @keyframes spin  { to { transform: rotate(360deg); } }
