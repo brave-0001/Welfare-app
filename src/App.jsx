@@ -1038,24 +1038,32 @@ function GroupChat({ member, isTreasurer }) {
 }
 
 // ─── Help Desk + AI Assistant ─────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are the Stahili Welfare Group assistant — friendly, warm, concise, and helpful. You help university Computer Science students with questions about the welfare group.
+const SYSTEM_PROMPT = `You are Stahili — the friendly assistant for the Stahili Welfare Group, a student welfare community at Kibabii University for Computer Science students.
 
-Key facts:
-- Joining fee: KSh 50 (one-time, paid via M-Pesa)
+You are warm, human, and genuinely helpful. You talk like a supportive friend who happens to know everything about the welfare group.
+
+CRITICAL RULES:
+1. For casual messages ("hi", "hello", "ok", "thanks", "cool", "great") — just respond warmly and naturally. NEVER say "I'll flag this for the admin". Just chat.
+2. Only say you'll escalate to admin for SPECIFIC personal account problems (e.g. "my payment didn't reflect", "I was wrongly declined") that genuinely need human intervention.
+3. Keep replies SHORT — 1-3 sentences. Don't over-explain.
+4. Use a warm, youthful, friendly tone. Light emoji is fine.
+
+KEY FACTS (answer these directly, don't escalate):
+- Group name: Stahili Welfare Group
+- Joining fee: KSh 50 (one-time, M-Pesa)
 - Monthly contribution: KSh 200 (keeps account active)
 - Till number: ${CONFIG.mpesa.till}
-- Loan requests require an active account (monthly contribution paid)
-- Loans are reviewed by the treasurer within 24 hours
-- Registration numbers must start with COM to be eligible for loans
-- Executive team: Chairperson (Isaac Kipngetich), Vice Chairperson (Daisy Sakwa), Secretary (Kelvin Simiyu), Treasurer (Brevian Emmanuel)
-- WhatsApp group available in the About tab
+- Loans: need active account, approved within 24hrs by treasurer
+- Registration must start with "COM" to apply for loans
+- Executives: Chairperson Isaac Kipngetich, Vice Chair Daisy Sakwa, Secretary Kelvin Simiyu, Treasurer Brevian Emmanuel
+- WhatsApp group in the About tab
 
-Conversation style:
-- Talk like a helpful, warm human colleague — NOT a robot
-- Keep replies SHORT — 1-3 sentences max unless detail is really needed
-- If someone says "ok", "thanks", "cool", etc — respond naturally like a human would (e.g. "Glad I could help! 😊" or "Anytime!")
-- ONLY escalate to admin (say "I'll flag this for the admin team") if the question is about a specific personal account issue, a complaint, or something you genuinely cannot answer
-- Never keep saying "message sent to admin" for casual conversation`;
+CONVERSATION EXAMPLES:
+User: "hi" → "Hey! 👋 How can I help you today?"
+User: "ok thanks" → "Anytime! 😊 Anything else?"
+User: "how do I contribute?" → "Go to the Contribute tab and tap 'Pay KSh 200 · M-Pesa'. A prompt goes to your phone — enter your PIN and you're done! ✓"
+User: "my account shows inactive" → "Your account goes active once you contribute KSh 200 for the current month. Head to the Contribute tab to pay. Takes less than a minute! 😊"`;
+
 
 function HelpDesk({ member, isTreasurer }) {
   const [threads, setThreads] = useState({});
@@ -1356,164 +1364,164 @@ function AboutTab() {
   );
 }
 // ─── Events Feed (Hero) ───────────────────────────────────────────────────────
+const HARDCODED_EVENTS = [
+  {
+    id: "evt-condolence-kilwake",
+    type: "condolence",
+    title: "In Memory of Love Kilwake",
+    body: "We extend our deepest condolences to Lecturer Juma Kilwake on the passing of his beloved daughter, Love Kilwake. May her gentle soul rest in eternal peace. As a community, we hold the Kilwake family close in this painful season. Contributions are ongoing — let us show up, as we always do, for one of our own.",
+    date: "April 2025",
+    images: [],
+    contributors: [
+      { name: "Isaac Kipngetich", note: "May she rest well." },
+      { name: "Daisy Sakwa", note: "Our hearts are with the family." },
+      { name: "Kelvin Simiyu", note: "Praying for strength." },
+      { name: "Brevian Emmanuel", note: "Coordinating contributions." },
+    ],
+  },
+  {
+    id: "evt-celebration-wilikister",
+    type: "celebration",
+    title: "Welcome, little one! 🍼",
+    body: "We are overjoyed to celebrate our very own Wilikister on the arrival of her beautiful newborn. A new life. A new beginning. This is one of those moments that reminds us why community matters. May motherhood bring you immeasurable joy, strength, and love. We stand with you, always. 💚",
+    date: "April 2025",
+    images: [],
+    contributors: [
+      { name: "Stahili Welfare", note: "With love from the whole group." },
+    ],
+  },
+];
+
 function EventsFeed({ member, isTreasurer }) {
-  const [events, setEvents] = useState([]);
+  const [dbEvents, setDbEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(null);
+  const [expanded, setExpanded] = useState("evt-condolence-kilwake");
   const [creating, setCreating] = useState(false);
 
   const fetchEvents = useCallback(async () => {
     const { data } = await supabase.from("events")
       .select("*, event_contributors(*)")
       .order("created_at", { ascending: false });
-    setEvents(data ?? []);
+    setDbEvents(data ?? []);
     setLoading(false);
-    if (data?.length > 0 && !expanded) setExpanded(data[0].id);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => { fetchEvents(); }, [fetchEvents]);
 
+  // Merge hardcoded + db events, hardcoded first
+  const allEvents = useMemo(() => {
+    const dbFormatted = dbEvents.map(ev => ({
+      id: ev.id, type: ev.type, title: ev.title, body: ev.body,
+      date: fmt.date(ev.created_at), images: ev.images ?? [],
+      contributors: (ev.event_contributors ?? []).map(c => ({ name: c.name, note: c.note })),
+      isDb: true,
+    }));
+    return [...HARDCODED_EVENTS, ...dbFormatted];
+  }, [dbEvents]);
+
   const typeConfig = {
-    celebration: { emoji: "🎉", color: "#5a9a7a", gradient: "linear-gradient(135deg, #4a8a6a 0%, #6aaa8a 100%)", label: "Celebration" },
-    condolence:  { emoji: "🕊️", color: "#6a7a9a", gradient: "linear-gradient(135deg, #5a6a8a 0%, #7a8aaa 100%)", label: "In Memoriam" },
-    update:      { emoji: "📋", color: "#8a7a5a", gradient: "linear-gradient(135deg, #7a6a4a 0%, #9a8a6a 100%)", label: "Update" },
-    urgent:      { emoji: "⚡", color: "#9a6a6a", gradient: "linear-gradient(135deg, #8a5a5a 0%, #aa7a7a 100%)", label: "Urgent" },
+    celebration: { emoji: "🎉", color: "#5a9a7a", gradient: "linear-gradient(140deg, #3d7a5e 0%, #5a9a7a 60%, #7aba9a 100%)", label: "Celebration" },
+    condolence:  { emoji: "🕊️", color: "#6a7a9a", gradient: "linear-gradient(140deg, #3d4d6a 0%, #5a6a8a 60%, #7a8aaa 100%)", label: "In Memoriam" },
+    update:      { emoji: "📋", color: "#8a7a5a", gradient: "linear-gradient(140deg, #6a5a3a 0%, #8a7a5a 60%, #aaa07a 100%)", label: "Update" },
+    urgent:      { emoji: "⚡", color: "#9a6a6a", gradient: "linear-gradient(140deg, #7a3a3a 0%, #9a5a5a 60%, #ba7a7a 100%)", label: "Urgent" },
   };
 
-  const DefaultAvatar = ({ name, size = 32 }) => {
-    const palette = ["#5a9a7a","#6a7a9a","#8a7a5a","#9a6a6a","#7a8a9a","#9a8a6a"];
-    const color = palette[name.charCodeAt(0) % palette.length];
+  const DefAvatar = ({ name, size = 30 }) => {
+    const pal = ["#5a9a7a","#6a7a9a","#8a7a5a","#9a6a6a","#7a8a9a"];
     return (
-      <div style={{ width:size, height:size, borderRadius:"50%", background:color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:size*0.36, fontWeight:600, color:"#fff", flexShrink:0 }}>
+      <div style={{width:size,height:size,borderRadius:"50%",background:pal[name.charCodeAt(0)%pal.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.36,fontWeight:600,color:"#fff",flexShrink:0}}>
         {fmt.initials(name)}
       </div>
     );
   };
 
   if (loading) return <Spinner />;
+  if (creating) return <EventsTab member={member} isTreasurer={isTreasurer} onClose={() => { setCreating(false); fetchEvents(); }} createOnly />;
 
-  if (creating) return (
-    <EventsTab member={member} isTreasurer={isTreasurer} onClose={() => { setCreating(false); fetchEvents(); }} createOnly />
-  );
+  const hero = allEvents[0];
+  const rest = allEvents.slice(1);
 
   return (
     <div className="events-feed">
-      {/* Section header */}
       <div className="events-feed-header">
         <div>
           <p className="events-feed-label">What's happening</p>
-          <p className="events-feed-sub">Announcements from your welfare group</p>
+          <p className="events-feed-sub">Welfare news & community moments</p>
         </div>
         {isTreasurer && (
           <button className="events-post-btn" onClick={() => setCreating(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Post
           </button>
         )}
       </div>
 
-      {events.length === 0 && (
-        <div className="🕊️ Condolence">
-          <p className="events-empty-title">In Memory of Love Kilwake</p>
-          <p className="events-empty-sub">We extend our deepest condolences to Lecturer Juma Kilwake on the passing of his beloved daughter, Love Kilwake. May her soul rest in eternal peace. As a community, we stand with the Kilwake family during this painful time. Contributions are ongoing — let us show up for one of our own.💚</p>
-        </div>
-      )}
-            {events.length === 0 && (
-        <div className="events-empty">
-          <p className="events-empty-title">Congratulations Wilikister! 🍼</p>
-          <p className="events-empty-sub">We are overjoyed to celebrate Wilikister on the arrival of her newborn. This is a beautiful moment for our community — a new life, a new blessing. May motherhood bring you immeasurable joy. We stand with you in this season. 💚</p>
-        </div>
-      )}
-
-      {/* Event cards — Apple News style */}
-      {events.map((ev, idx) => {
-        const tc = typeConfig[ev.type] ?? typeConfig.update;
-        const isOpen = expanded === ev.id;
-        const isHero = idx === 0;
-        const contribs = ev.event_contributors ?? [];
-
+      {/* ── Hero card ── */}
+      {hero && (() => {
+        const tc = typeConfig[hero.type] ?? typeConfig.update;
+        const isOpen = expanded === hero.id;
         return (
-          <div key={ev.id} className={`feed-card ${isHero?"feed-card-hero":""}`}
-            style={isHero ? { "--hero-gradient": tc.gradient } : { "--event-color": tc.color }}>
-
-            {/* Hero card — full visual impact */}
-            {isHero ? (
-              <div className="feed-hero-inner" onClick={() => setExpanded(isOpen ? null : ev.id)}>
-                <div className="feed-hero-bg" style={{background: tc.gradient}} />
-                <div className="feed-hero-content">
-                  <div className="feed-hero-tag">
-                    <span>{tc.emoji}</span>
-                    <span>{tc.label}</span>
-                  </div>
-                  <h2 className="feed-hero-title">{ev.title}</h2>
-                  <p className="feed-hero-body">{ev.body}</p>
-                  <span className="feed-hero-date">{fmt.date(ev.created_at)}</span>
-                </div>
-                {ev.images?.[0] && (
-                  <div className="feed-hero-image">
-                    <img src={ev.images[0]} alt="" />
-                  </div>
-                )}
+          <div className="feed-card feed-card-hero" onClick={() => setExpanded(isOpen ? null : hero.id)}>
+            <div className="feed-hero-inner" style={{background: tc.gradient}}>
+              <div className="feed-hero-content">
+                <div className="feed-hero-tag">{tc.emoji} {tc.label}</div>
+                <h2 className="feed-hero-title">{hero.title}</h2>
+                <p className="feed-hero-body">{hero.body}</p>
+                <span className="feed-hero-date">{hero.date}</span>
               </div>
-            ) : (
-              /* Regular card */
-              <div className="feed-regular" onClick={() => setExpanded(isOpen ? null : ev.id)}>
-                <div className="feed-regular-accent" style={{background: tc.color}} />
-                <div className="feed-regular-content">
-                  <div className="feed-regular-tag">
-                    <span>{tc.emoji}</span>
-                    <span style={{color: tc.color}}>{tc.label}</span>
-                    <span className="feed-regular-date">{fmt.date(ev.created_at)}</span>
-                  </div>
-                  <h3 className="feed-regular-title">{ev.title}</h3>
-                  <p className={`feed-regular-body ${isOpen?"":"feed-clamp"}`}>{ev.body}</p>
+              {hero.images?.[0] && (
+                <div className="feed-hero-image"><img src={hero.images[0]} alt="" /></div>
+              )}
+            </div>
+            {isOpen && hero.contributors?.length > 0 && (
+              <div className="feed-expanded">
+                <p className="feed-contribs-label">Contributors</p>
+                <div className="feed-contribs-list">
+                  {hero.contributors.map((c,i) => (
+                    <div key={i} className="feed-contrib-chip">
+                      <DefAvatar name={c.name} size={28} />
+                      <div><p className="feed-contrib-name">{c.name}</p>{c.note && <p className="feed-contrib-note">{c.note}</p>}</div>
+                    </div>
+                  ))}
                 </div>
-                {ev.images?.[0] && (
-                  <div className="feed-regular-thumb">
-                    <img src={ev.images[0]} alt="" />
-                  </div>
-                )}
               </div>
             )}
+          </div>
+        );
+      })()}
 
-            {/* Expanded content */}
-            {isOpen && (
+      {/* ── Rest cards ── */}
+      {rest.map(ev => {
+        const tc = typeConfig[ev.type] ?? typeConfig.update;
+        const isOpen = expanded === ev.id;
+        return (
+          <div key={ev.id} className="feed-card" style={{"--event-color": tc.color}} onClick={() => setExpanded(isOpen ? null : ev.id)}>
+            <div className="feed-regular">
+              <div className="feed-regular-accent" style={{background: tc.color}} />
+              <div className="feed-regular-content">
+                <div className="feed-regular-tag">
+                  <span>{tc.emoji}</span>
+                  <span style={{color: tc.color}}>{tc.label}</span>
+                  <span className="feed-regular-date">{ev.date}</span>
+                </div>
+                <h3 className="feed-regular-title">{ev.title}</h3>
+                <p className={`feed-regular-body ${isOpen?"":"feed-clamp"}`}>{ev.body}</p>
+              </div>
+              {ev.images?.[0] && (
+                <div className="feed-regular-thumb"><img src={ev.images[0]} alt="" /></div>
+              )}
+            </div>
+            {isOpen && ev.contributors?.length > 0 && (
               <div className="feed-expanded">
-                {/* Extra images */}
-                {ev.images?.length > 1 && (
-                  <div className={`event-img-grid event-img-grid-${Math.min(ev.images.length - 1, 3)}`} style={{margin:"0 0 1rem"}}>
-                    {ev.images.slice(1).map((url, i) => (
-                      <div key={i} className="event-img-cell">
-                        <img src={url} alt="" loading="lazy" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* First image for non-hero cards */}
-                {!isHero && ev.images?.[0] && ev.images.length === 1 && (
-                  <div className="event-img-grid event-img-grid-1" style={{margin:"0 0 1rem"}}>
-                    <div className="event-img-cell"><img src={ev.images[0]} alt="" loading="lazy" /></div>
-                  </div>
-                )}
-
-                {/* Contributors */}
-                {contribs.length > 0 && (
-                  <div className="feed-contribs">
-                    <p className="feed-contribs-label">Contributors</p>
-                    <div className="feed-contribs-list">
-                      {contribs.map((c, i) => (
-                        <div key={i} className="feed-contrib-chip">
-                          <DefaultAvatar name={c.name} size={28} />
-                          <div>
-                            <p className="feed-contrib-name">{c.name}</p>
-                            {c.note && <p className="feed-contrib-note">{c.note}</p>}
-                          </div>
-                        </div>
-                      ))}
+                <p className="feed-contribs-label">Contributors</p>
+                <div className="feed-contribs-list">
+                  {ev.contributors.map((c,i) => (
+                    <div key={i} className="feed-contrib-chip">
+                      <DefAvatar name={c.name} size={26} />
+                      <div><p className="feed-contrib-name">{c.name}</p>{c.note && <p className="feed-contrib-note">{c.note}</p>}</div>
                     </div>
-                  </div>
-                )}
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1778,12 +1786,85 @@ function EventsTab({ member, isTreasurer, onClose, createOnly }) {
   );
 }
 
+// ─── Welfare Voice ────────────────────────────────────────────────────────────
+function WelfareVoice({ member }) {
+  const [text, setText] = useState("");
+  const [category, setCategory] = useState("need-help");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const CATEGORIES = [
+    { key:"need-help",    label:"I need help",       emoji:"🙏" },
+    { key:"suggestion",   label:"Suggestion",         emoji:"💡" },
+    { key:"appreciation", label:"Appreciation",       emoji:"❤️" },
+    { key:"complaint",    label:"Concern",            emoji:"⚠️" },
+  ];
+
+  const submit = useCallback(async () => {
+    if (!text.trim()) return;
+    setSending(true);
+    await supabase.from("welfare_voices").insert({
+      member_id: member.id,
+      category,
+      message: text.trim(),
+    });
+    setSending(false); setSent(true); setText(""); setOpen(false);
+    setTimeout(() => setSent(false), 4000);
+  }, [text, category, member.id]);
+
+  return (
+    <div className="voice-section">
+      {sent && (
+        <div className="voice-sent">
+          <span>✓</span> Your message reached the admin. Thank you for speaking up.
+        </div>
+      )}
+      {!open ? (
+        <button className="voice-trigger" onClick={() => setOpen(true)}>
+          <span className="voice-trigger-icon">🗣️</span>
+          <div>
+            <p className="voice-trigger-title">Share your welfare situation</p>
+            <p className="voice-trigger-sub">Need help? Have a suggestion? Let us know.</p>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      ) : (
+        <NeuCard>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"0.85rem"}}>
+            <p style={{fontFamily:"var(--font-head)",fontSize:"1rem",fontWeight:400}}>Your welfare voice</p>
+            <button className="text-link" style={{fontSize:"0.8rem"}} onClick={() => setOpen(false)}>Close</button>
+          </div>
+          <div className="voice-cats">
+            {CATEGORIES.map(c => (
+              <button key={c.key} className={`voice-cat-btn ${category===c.key?"voice-cat-active":""}`} onClick={() => setCategory(c.key)}>
+                {c.emoji} {c.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="neu-input neu-textarea"
+            rows={3}
+            placeholder={category==="need-help" ? "Describe your situation. We're listening and we care." : category==="suggestion" ? "What would make Stahili better?" : category==="appreciation" ? "Who or what made a difference?" : "Share your concern — it will be addressed."}
+            value={text}
+            onChange={e => setText(e.target.value)}
+            style={{marginTop:"0.75rem"}}
+          />
+          <NeuBtn full loading={sending} onClick={submit} style={{marginTop:"0.75rem"}}>
+            Send to Admin
+          </NeuBtn>
+        </NeuCard>
+      )}
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardPage({ member, onLogout }) {
   const { loans, loading: loansLoading } = useLoans(member.id);
   const { contributions } = useContributions(member.id);
   const ann = useAnnouncement();
-  const [tab, setTab] = useState(null); // null = home feed
+  const [tab, setTab] = useState("home");
   const isTreasurer = member.email === CONFIG.treasurer.email;
 
   const isActive = useMemo(() => contributions.some(c => c.month_key===fmt.monthKey() && c.status==="confirmed"), [contributions]);
@@ -1794,99 +1875,158 @@ function DashboardPage({ member, onLogout }) {
   }), [loans]);
   const pendingCount = useMemo(() => loans.filter(l => l.status==="pending").length, [loans]);
 
-  const TABS = [
-    ["contribute", "Contribute", null],
-    ["loans", "Loans", pendingCount || null],
-    ["request", "Request", null],
-    ["community", "Community", null],
-    ["about", "About", null],
+  const DOCK = [
+    { key:"home",       icon:"⌂",  label:"Home"      },
+    { key:"contribute", icon:"◎",  label:"Contribute" },
+    { key:"community",  icon:"💬", label:"Community"  },
+    { key:"loans",      icon:"≡",  label:"Loans", badge: pendingCount||null },
+    { key:"more",       icon:"···", label:"More"     },
   ];
 
   return (
-    <div className="dash-page">
+    <div className="dash-page dash-with-dock">
       <AnnouncementBanner ann={ann} />
 
-      {/* ── Top bar ── */}
-      <header className="dash-top-bar">
-        <div className="dash-top-left">
-          {tab && (
-            <button className="dash-back-btn" onClick={() => setTab(null)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-          )}
-          <div>
-            {!tab && <p className="dash-eyebrow">Welcome back</p>}
-            <h2 className="dash-name">{tab ? (() => { const t = TABS.find(t=>t[0]===tab); return t?.[1] ?? ""; })() : member.full_name}</h2>
-          </div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:"0.6rem"}}>
-          <ActivePill active={isActive} />
-          <button className="text-link" onClick={onLogout}>Sign out</button>
-        </div>
-      </header>
+      {/* ── Scrollable content ── */}
+      <div className="dash-scroll-area">
 
-      {/* ── Home feed (no tab selected) ── */}
-      {!tab && (
-        <div className="home-feed">
-          {/* Stats strip */}
-          <div className="stats-strip">
-            {[{l:"Requests",v:stats.total},{l:"Approved",v:stats.approved},{l:"Borrowed",v:fmt.currency(stats.borrowed)}].map(({l,v}) => (
-              <div key={l} className="stat-tile">
-                <span className="stat-val">{v}</span>
-                <span className="stat-lbl">{l}</span>
+        {/* ── HOME ── */}
+        {tab==="home" && (
+          <>
+            <header className="dash-top-bar">
+              <div>
+                <p className="dash-eyebrow">Welcome back</p>
+                <h2 className="dash-name">{member.full_name}</h2>
               </div>
-            ))}
-          </div>
+              <div style={{display:"flex",alignItems:"center",gap:"0.6rem"}}>
+                <ActivePill active={isActive} />
+                <button className="text-link" onClick={onLogout}>Sign out</button>
+              </div>
+            </header>
 
-          {/* Events hero — full width, no tab */}
-          <EventsFeed member={member} isTreasurer={isTreasurer} />
-
-          {/* Quick actions */}
-          <div className="quick-actions">
-            {TABS.map(([key, label, badge]) => (
-              <button key={key} className="quick-action-btn" onClick={() => setTab(key)}>
-                <span className="quick-action-label">{label}</span>
-                {badge && <span className="quick-action-badge">{badge}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Tab content ── */}
-      {tab && (
-        <div className="tab-body" style={{paddingTop:"0.5rem"}}>
-          {tab==="contribute" && <ContributionModule member={member} onPhoneAdded={(phone) => { member.phone = phone; }} />}
-          {tab==="loans" && (
-            <div className="section-stack">
-              {loansLoading ? <Spinner /> : loans.length===0 ? (
-                <div className="empty-state">
-                  <p>No loan requests yet.</p>
-                  <button className="text-link" onClick={() => setTab("request")}>Make your first request →</button>
-                </div>
-              ) : (
-                <div className="neu-list">
-                  {loans.map(loan => (
-                    <div key={loan.id} className={`neu-list-row row-accent-${loan.status}`}>
-                      <div className="row-info">
-                        <span className="row-title">{loan.description}</span>
-                        <span className="row-meta">{fmt.date(loan.created_at)}</span>
-                      </div>
-                      <div className="row-right">
-                        {loan.amount > 0 && <span className="row-amount">{fmt.currency(loan.amount)}</span>}
-                        <StatusBadge status={loan.status} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* Welfare status card */}
+            <div className="welfare-hero-card" onClick={() => setTab("contribute")}>
+              <div className="welfare-hero-left">
+                <p className="welfare-hero-label">Monthly contribution</p>
+                <h3 className="welfare-hero-amount">{fmt.currency(CONFIG.group.monthlyFee)}</h3>
+                <p className="welfare-hero-sub">{isActive ? "You're active this month ✓" : "Contribute to stay active"}</p>
+              </div>
+              <div className={`welfare-hero-pip ${isActive?"pip-active":"pip-inactive"}`} />
             </div>
-          )}
-          {tab==="request"   && <LoanModule member={member} isActive={isActive} />}
-          {tab==="community" && <ConnectHub member={member} />}
-          {tab==="about"     && <AboutTab />}
-        </div>
-      )}
+
+            {/* Events feed — the soul of the page */}
+            <EventsFeed member={member} isTreasurer={isTreasurer} />
+
+            {/* Welfare voice — share your situation */}
+            <WelfareVoice member={member} />
+
+            {/* Compact stats */}
+            <div className="home-stats-row">
+              {[{l:"My Requests",v:stats.total,action:()=>setTab("loans")},{l:"Approved",v:stats.approved,action:()=>setTab("loans")},{l:"Borrowed",v:fmt.currency(stats.borrowed),action:()=>setTab("loans")}].map(({l,v,action}) => (
+                <div key={l} className="stat-tile" style={{cursor:"pointer"}} onClick={action}>
+                  <span className="stat-val">{v}</span>
+                  <span className="stat-lbl">{l}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── CONTRIBUTE ── */}
+        {tab==="contribute" && (
+          <>
+            <header className="dash-top-bar">
+              <h2 className="dash-name">Contribute</h2>
+              <ActivePill active={isActive} />
+            </header>
+            <div className="tab-body">
+              <ContributionModule member={member} onPhoneAdded={(phone) => { member.phone = phone; }} />
+            </div>
+          </>
+        )}
+
+        {/* ── COMMUNITY ── */}
+        {tab==="community" && (
+          <>
+            <header className="dash-top-bar">
+              <h2 className="dash-name">Community</h2>
+            </header>
+            <div className="tab-body">
+              <ConnectHub member={member} />
+            </div>
+          </>
+        )}
+
+        {/* ── LOANS ── */}
+        {tab==="loans" && (
+          <>
+            <header className="dash-top-bar">
+              <h2 className="dash-name">Loans</h2>
+            </header>
+            <div className="tab-body">
+              <div className="section-stack">
+                <NeuBtn full onClick={() => setTab("request")}>Request a Loan</NeuBtn>
+                {loansLoading ? <Spinner /> : loans.length===0 ? (
+                  <div className="empty-state"><p>No loan requests yet.</p></div>
+                ) : (
+                  <div className="neu-list">
+                    {loans.map(loan => (
+                      <div key={loan.id} className={`neu-list-row row-accent-${loan.status}`}>
+                        <div className="row-info">
+                          <span className="row-title">{loan.description}</span>
+                          <span className="row-meta">{fmt.date(loan.created_at)}</span>
+                        </div>
+                        <div className="row-right">
+                          {loan.amount > 0 && <span className="row-amount">{fmt.currency(loan.amount)}</span>}
+                          <StatusBadge status={loan.status} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── REQUEST ── */}
+        {tab==="request" && (
+          <>
+            <header className="dash-top-bar">
+              <button className="dash-back-btn" onClick={() => setTab("loans")}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <h2 className="dash-name">Loan Request</h2>
+            </header>
+            <div className="tab-body">
+              <LoanModule member={member} isActive={isActive} />
+            </div>
+          </>
+        )}
+
+        {/* ── MORE ── */}
+        {tab==="more" && (
+          <>
+            <header className="dash-top-bar">
+              <h2 className="dash-name">More</h2>
+            </header>
+            <div className="tab-body">
+              <AboutTab />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Bottom dock ── */}
+      <nav className="bottom-dock">
+        {DOCK.map(({key,icon,label,badge}) => (
+          <button key={key} className={`dock-btn ${tab===key?"dock-btn-active":""}`} onClick={() => setTab(key)}>
+            <span className="dock-icon">{icon}</span>
+            <span className="dock-label">{label}</span>
+            {badge && <span className="dock-badge">{badge}</span>}
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }
@@ -2438,10 +2578,10 @@ const CSS = `
   .msg-bubble { padding: 0.58rem 0.95rem; border-radius: 18px; font-size: 0.875rem; line-height: 1.5; word-break: break-word; max-width: 100%; }
   .bubble-them { background: var(--bg); box-shadow: var(--neu-out-sm); color: var(--fg); border-bottom-left-radius: 5px; }
   .bubble-me { background: linear-gradient(140deg, #6b82b8, #8b9dc3); color: #fff; border-bottom-right-radius: 5px; box-shadow: 3px 3px 10px rgba(107,130,184,0.35); }
-  .msg-actions { position: relative; }
+  .msg-actions { position: relative; z-index: 10; }
   .msg-action-dot { font-size: 0.75rem; color: var(--muted); cursor: pointer; padding: 0.25rem 0.35rem; border-radius: 6px; opacity: 0; user-select: none; transition: opacity 0.15s; }
   .msg-wrap:hover .msg-action-dot { opacity: 1; }
-  .msg-menu { position: absolute; bottom: 100%; right: 0; background: var(--surface); box-shadow: 0 4px 20px rgba(0,0,0,0.15); border-radius: var(--r-sm); overflow: hidden; min-width: 160px; z-index: 50; border: 0.5px solid var(--border); }
+  .msg-menu { position: absolute; bottom: 100%; right: 0; background: var(--surface); box-shadow: 0 4px 20px rgba(0,0,0,0.15); border-radius: var(--r-sm); overflow: hidden; min-width: 160px; z-index: 100; border: 0.5px solid var(--border); max-width: 200px; }
   .msg-menu-item { display: block; width: 100%; padding: 0.7rem 1rem; font-family: var(--font-body); font-size: 0.8rem; font-weight: 500; color: var(--fg); background: none; border: none; cursor: pointer; text-align: left; transition: background 0.15s; }
   .msg-menu-item:hover { background: var(--surface2); }
   .msg-menu-danger { color: var(--danger); }
@@ -2536,6 +2676,62 @@ const CSS = `
   .feed-contrib-chip { display: flex; align-items: center; gap: 0.65rem; }
   .feed-contrib-name { font-size: 0.83rem; font-weight: 600; color: var(--fg); }
   .feed-contrib-note { font-size: 0.7rem; color: var(--muted); }
+
+  /* ── Bottom dock ── */
+  .dash-with-dock { display: flex; flex-direction: column; height: 100svh; }
+  .dash-scroll-area { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0.5rem; }
+  .bottom-dock {
+    display: flex; align-items: center; justify-content: space-around;
+    background: var(--bg); border-top: 0.5px solid var(--border);
+    box-shadow: 0 -4px 20px rgba(93,107,107,0.08);
+    padding: 0.4rem 0 calc(0.4rem + env(safe-area-inset-bottom));
+    flex-shrink: 0; position: sticky; bottom: 0; z-index: 50;
+  }
+  .dock-btn { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; background: none; border: none; cursor: pointer; padding: 0.35rem 0.75rem; border-radius: var(--r-sm); transition: all 0.18s; position: relative; min-width: 52px; }
+  .dock-btn:active { transform: scale(0.92); }
+  .dock-icon { font-size: 1.25rem; line-height: 1; color: var(--muted); transition: all 0.18s; }
+  .dock-label { font-size: 0.6rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; transition: color 0.18s; }
+  .dock-btn-active .dock-icon { color: var(--accent2); transform: scale(1.12); }
+  .dock-btn-active .dock-label { color: var(--accent2); }
+  .dock-badge { position: absolute; top: 0.1rem; right: 0.3rem; background: var(--accent); color: #fff; font-size: 0.56rem; font-weight: 700; border-radius: 999px; padding: 0.08rem 0.35rem; min-width: 14px; text-align: center; }
+
+  /* ── Welfare hero card ── */
+  .welfare-hero-card {
+    margin: 0 1.5rem 0;
+    background: linear-gradient(140deg, var(--p1,#5D6B6B) 0%, var(--p2,#7eaaaa) 100%);
+    border-radius: var(--r); padding: 1.25rem 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; box-shadow: var(--shadow-md);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .welfare-hero-card:active { transform: scale(0.98); }
+  .welfare-hero-label { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(241,247,247,0.65); margin-bottom: 0.2rem; }
+  .welfare-hero-amount { font-family: var(--font-head); font-size: 1.6rem; font-weight: 400; color: #fff; line-height: 1.1; margin-bottom: 0.25rem; }
+  .welfare-hero-sub { font-size: 0.75rem; color: rgba(241,247,247,0.75); }
+  .welfare-hero-pip { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+  .pip-active { background: #7ef7b0; box-shadow: 0 0 0 4px rgba(126,247,176,0.2); animation: pulse 2s ease-in-out infinite; }
+  .pip-inactive { background: rgba(255,255,255,0.3); }
+
+  /* ── Home stats row ── */
+  .home-stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.6rem; margin: 0 1.5rem 1.5rem; }
+
+  /* ── Welfare voice ── */
+  .voice-section { margin: 0 1.5rem; }
+  .voice-trigger { display: flex; align-items: center; gap: 0.85rem; width: 100%; background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: var(--r); padding: 1.1rem 1.25rem; cursor: pointer; text-align: left; transition: all 0.18s; }
+  .voice-trigger:active { box-shadow: var(--neu-in-sm); }
+  .voice-trigger-icon { font-size: 1.5rem; flex-shrink: 0; }
+  .voice-trigger-title { font-size: 0.88rem; font-weight: 600; color: var(--fg); margin-bottom: 0.1rem; }
+  .voice-trigger-sub { font-size: 0.73rem; color: var(--muted); }
+  .voice-cats { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .voice-cat-btn { background: var(--bg); box-shadow: var(--neu-out-sm); border: 1.5px solid transparent; border-radius: 999px; padding: 0.38rem 0.85rem; font-family: var(--font-body); font-size: 0.75rem; font-weight: 500; color: var(--muted); cursor: pointer; transition: all 0.18s; }
+  .voice-cat-active { box-shadow: var(--neu-in-sm); border-color: var(--accent2); color: var(--accent2); }
+  .voice-sent { background: rgba(90,154,122,0.1); border: 1px solid rgba(90,154,122,0.25); border-radius: var(--r-sm); padding: 0.75rem 1rem; font-size: 0.82rem; color: #5a9a7a; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+
+  /* ── Home/dash top bar ── */
+  .dash-top-bar { display: flex; align-items: center; justify-content: space-between; padding: 2rem 1.5rem 1rem; gap: 1rem; }
+  .dash-top-left { display: flex; align-items: center; gap: 0.6rem; }
+  .dash-back-btn { background: var(--bg); box-shadow: var(--neu-out-sm); border: none; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--fg); flex-shrink: 0; transition: all 0.18s; }
+  .dash-back-btn:active { box-shadow: var(--neu-in-sm); }
 
   /* ── Events ── */
   .event-create-header { display: flex; align-items: center; justify-content: space-between; }
